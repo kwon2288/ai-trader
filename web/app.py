@@ -28,7 +28,7 @@ from trader.runner import Busy, refresh_balance, run_cycle  # noqa: E402
 from web import settings_io  # noqa: E402
 
 app = Flask(__name__)
-CONFIG_PATH = cfgmod.ROOT / "config.toml"
+CONFIG_PATH = cfgmod.ensure_config()
 SCHEDULE = [(10, 0), (14, 30)]  # deploy/ai-trader.timer 와 동일
 
 

@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# 서버별 설정 (웹에서 바뀜) — 처음 실행 시 config.example.toml 에서 자동 생성
+config.toml
+
 # 실행 데이터 (매매일지·로그·토큰 캐시·웹 세션 키)
 data/
 

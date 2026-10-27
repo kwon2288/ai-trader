@@ -56,9 +56,22 @@ class Config:
         return self.data_dir / "STOP"
 
 
+CONFIG_PATH = ROOT / "config.toml"
+EXAMPLE_PATH = ROOT / "config.example.toml"
+
+
+def ensure_config() -> Path:
+    """config.toml 은 서버마다 다른 설정(웹에서 바꾼 값)이라 git 에 넣지 않는다.
+    없으면 config.example.toml 을 복사해 만든다."""
+    if not CONFIG_PATH.exists():
+        import shutil
+        shutil.copy(EXAMPLE_PATH, CONFIG_PATH)
+    return CONFIG_PATH
+
+
 def load(config_path: Path | None = None) -> Config:
     _load_dotenv(ROOT / ".env")
-    raw = tomllib.loads((config_path or ROOT / "config.toml").read_text(encoding="utf-8"))
+    raw = tomllib.loads((config_path or ensure_config()).read_text(encoding="utf-8"))
     b, r, o, a = raw["budget"], raw["risk"], raw.get("order", {}), raw.get("ai", {})
     mode = os.environ.get("TRADING_MODE", "dry").strip().lower()
     if mode not in {"dry", "mock", "live"}:

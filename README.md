@@ -71,7 +71,7 @@ AI가 이상한 값을 내거나 응답에 실패하면 그 회차는 매매하�
 | 동시 실행 | 잠금 | 타이머·웹·명령줄 실행이 겹치지 않음 |
 | 킬스위치 | `run.py stop` / 웹 ‘정지’ | |
 
-모든 수치는 웹 설정 화면이나 `config.toml`에서 바꿀 수 있습니다.
+모든 수치는 웹 설정 화면이나 `config.toml`에서 바꿀 수 있습니다. `config.toml`은 처음 실행할 때 `config.example.toml`을 복사해 자동으로 만들어지며, git에는 올라가지 않아서 업데이트해도 설정이 유지됩니다.
 
 ---
 
@@ -214,6 +214,16 @@ sudo systemctl enable --now ai-trader-web
 
 ---
 
+## 업데이트
+
+```bash
+cd /opt/ai-trader
+bash deploy/update.sh      # git pull → 패키지 설치 → 웹 화면 재시작
+```
+
+`.env`, `config.toml`, `data/`는 git에 없으므로 업데이트해도 그대로 유지됩니다.
+자동 실행(타이머)은 매번 새로 시작하므로 따로 재시작할 필요가 없습니다.
+
 ## 실계좌로 전환
 
 `.env`에서 세 줄을 바꿉니다.
@@ -231,7 +241,7 @@ I_UNDERSTAND_REAL_MONEY=yes
 ```
 ai-trader/
 ├── run.py                 # 명령줄 진입점
-├── config.toml            # 전략 설정 (예산·위험관리·AI·종목)
+├── config.example.toml    # 전략 설정 예시 → 첫 실행 시 config.toml 로 복사 (git 제외)
 ├── .env.example           # 자격증명·모드 템플릿
 ├── trader/
 │   ├── bot.py             # 한 사이클: 데이터 → 손절/익절 → AI → 위험관리 → 주문
@@ -243,7 +253,7 @@ ai-trader/
 │   ├── runner.py          # 실행 잠금·증권사 선택 (명령줄·타이머·웹 공용)
 │   └── config.py
 ├── web/                   # Flask 웹 관리 화면
-├── deploy/                # systemd 서비스·타이머
+├── deploy/                # systemd 서비스·타이머, update.sh
 ├── tests/                 # 오프라인 테스트 (네트워크·키 불필요)
 └── data/                  # 실행 시 생성: journal.db, 로그, 토큰 캐시 (git 제외)
 ```
