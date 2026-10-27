@@ -1,5 +1,19 @@
 {% extends "base.html" %}
-{% block title %}설정 · AI 자동매매{% endblock %}
+{% block title %}설정 · AI 자동매매<script>
+// '직접 입력…'을 고르면 입력칸을 보여준다
+document.querySelectorAll('.model-select').forEach(function (sel) {
+  var box = sel.parentElement.querySelector('.model-custom');
+  function sync() {
+    var on = sel.value === '__custom__';
+    box.style.display = on ? 'block' : 'none';
+    box.required = on;
+    if (on) box.focus();
+  }
+  sel.addEventListener('change', sync);
+  sync();
+});
+</script>
+{% endblock %}
 {% block body %}
 <form method="post">
 <div class="card">
@@ -26,9 +40,16 @@
   </div>
   <div class="grid2">
   {% for key, label, options in model_fields %}
+    {% set cur = c.ai_models[key.split('_')[0]] %}
+    {% set known = options|map(attribute=0)|list %}
     <div><label for="{{ key }}">{{ label }}</label>
-      <input id="{{ key }}" name="{{ key }}" list="dl_{{ key }}" value="{{ c.ai_models[key.split('_')[0]] }}">
-      <datalist id="dl_{{ key }}">{% for m in options %}<option value="{{ m }}">{% endfor %}</datalist></div>
+      <select id="{{ key }}" name="{{ key }}" class="model-select">
+      {% for val, desc in options %}<option value="{{ val }}" {{ 'selected' if cur == val }}>{{ desc }}</option>{% endfor %}
+      {% if cur not in known %}<option value="{{ cur }}" selected>{{ cur }} (현재 설정)</option>{% endif %}
+        <option value="__custom__">직접 입력…</option>
+      </select>
+      <input name="{{ key }}_custom" class="model-custom" placeholder="모델 ID 입력 (예: {{ known[0] }})"
+             style="display:none;margin-top:6px" autocomplete="off"></div>
   {% endfor %}
     <div><label for="order_type">주문 방식</label>
       <select id="order_type" name="order_type">
@@ -55,4 +76,18 @@
     서버의 <code>/opt/ai-trader/.env</code> 를 수정한 뒤 <code>systemctl restart ai-trader-web</code> 하세요.
   </div>
 </div>
+<script>
+// '직접 입력…'을 고르면 입력칸을 보여준다
+document.querySelectorAll('.model-select').forEach(function (sel) {
+  var box = sel.parentElement.querySelector('.model-custom');
+  function sync() {
+    var on = sel.value === '__custom__';
+    box.style.display = on ? 'block' : 'none';
+    box.required = on;
+    if (on) box.focus();
+  }
+  sel.addEventListener('change', sync);
+  sync();
+});
+</script>
 {% endblock %}

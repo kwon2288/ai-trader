@@ -25,9 +25,21 @@ PROVIDER_CHOICES = {
     "consensus": "다수결 (키가 있는 AI 모두에게 묻고 과반 의견만 실행)",
 }
 MODEL_FIELDS = [  # (설정키, 라벨, 추천 목록)
-    ("claude_model", "Claude 모델", ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"]),
-    ("gemini_model", "Gemini 모델", ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon"]),
-    ("openai_model", "ChatGPT 모델", ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"]),
+    ("claude_model", "Claude 모델", [
+        ("claude-sonnet-5-5", "Sonnet 5.5 · 기본"),
+        ("claude-haiku-5-5", "Haiku 5.5 · 저렴"),
+        ("claude-opus-5-5", "Opus 5.5 · 고성능"),
+    ]),
+    ("gemini_model", "Gemini 모델", [
+        ("gemini-3.8-flash", "3.8 Flash · 기본 (무료 ~20회/일)"),
+        ("gemini-3.5-flash-lite", "3.5 Flash-Lite · 저렴 (무료 ~500회/일)"),
+        ("gemini-4-argon", "4 Argon · 고성능"),
+    ]),
+    ("openai_model", "ChatGPT 모델", [
+        ("gpt-6.1-sol", "GPT-6.1 Sol · 기본"),
+        ("gpt-6-luna", "GPT-6 Luna · 저렴"),
+        ("gpt-6-astra", "GPT-6 Astra · 고성능"),
+    ]),
 ]
 
 
@@ -93,6 +105,8 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     models = {}
     for key, label, _ in MODEL_FIELDS:
         m = form.get(key, "").strip()
+        if m == "__custom__":   # 드롭다운에서 '직접 입력' 선택
+            m = form.get(f"{key}_custom", "").strip()
         if not re.fullmatch(r"[a-z0-9][a-z0-9.\-]{2,60}", m):
             errors.append(f"{label} 이름이 올바르지 않습니다")
         models[key] = m
