@@ -1,0 +1,19 @@
+# 자격증명 — 절대 커밋 금지
+.env
+.env.*
+!.env.example
+
+# 실행 데이터 (매매일지·로그·토큰 캐시·웹 세션 키)
+data/
+
+# 파이썬
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 기타
+*.zip
+*.log
+.DS_Store

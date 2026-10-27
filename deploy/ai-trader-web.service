@@ -1,0 +1,13 @@
+[Unit]
+Description=AI 자동매매 웹 관리 화면
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/ai-trader
+ExecStart=/opt/ai-trader/.venv/bin/python -m web.app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

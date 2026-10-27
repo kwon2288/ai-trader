@@ -1,0 +1,6 @@
+nhplug>=0.4.1      # NH투자증권(나무) 공식 SDK
+requests>=2.31     # 한국투자증권 · Gemini · ChatGPT 호출
+anthropic>=0.40    # Claude
+# 웹 관리 화면
+flask>=3.0
+waitress>=3.0

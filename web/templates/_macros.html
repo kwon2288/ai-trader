@@ -1,0 +1,37 @@
+{% macro won(v) %}{{ "{:,}".format(v|int) }}원{% endmacro %}
+{% macro pct(v) %}<span class="{{ 'up' if v > 0 else ('down' if v < 0 else '') }}">{{ "%+.2f"|format(v) }}%</span>{% endmacro %}
+
+{% macro run_card(r) %}
+<div class="mute">{{ r.ts[:16].replace('T',' ') }}{% if r.ai %} · 🧠 {{ r.ai }}{% endif %}</div>
+<p style="margin:4px 0 8px">{{ r.market_view }}</p>
+{% for d in r.decisions %}
+<div class="dec">
+  <span class="act-{{ d.action }}">{{ {'BUY':'매수','SELL':'매도','HOLD':'유지'}.get(d.action, d.action) }}</span>
+  {{ d.code }} <span class="mute">확신 {{ "%.2f"|format(d.confidence or 0) }} · {{ d.outcome }}</span>
+  <div class="mute">{{ d.reason }}</div>
+</div>
+{% else %}<div class="mute">판단 없음</div>{% endfor %}
+{% endmacro %}
+
+{% macro order_table(orders) %}
+<div class="scroll"><table>
+<tr><th>시각</th><th>구분</th><th>종목</th><th class="r">수량</th><th class="r">금액</th><th>사유</th></tr>
+{% for o in orders %}
+<tr>
+  <td class="nw">{{ o.ts[5:10] }}<div class="mute">{{ o.ts[11:16] }}</div></td>
+  <td class="nw act-{{ o.side }}">{{ '매수' if o.side=='BUY' else '매도' }}{% if not o.ok %} <span class="badge b-err">실패</span>{% endif %}</td>
+  <td>{{ o.name }}<div class="mute">{{ o.code }}</div></td>
+  <td class="r">{{ o.qty }}</td><td class="r">{{ "{:,}".format(o.qty * o.est_price) }}</td>
+  <td>{{ o.trigger }}{% if not o.ok %}<div class="mute">{{ o.message }}</div>{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="6" class="mute">주문 내역이 없습니다.</td></tr>{% endfor %}
+</table></div>
+{% endmacro %}
+
+{% macro log_item(l) %}
+<details>
+  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ {'trade':'매매','analyze':'분석'}.get(l.kind, l.kind) }}
+    · {{ {'timer':'자동','web':'웹','cli':'명령줄'}.get(l.source, l.source) }}</summary>
+  <pre>{{ l.output }}</pre>
+</details>
+{% endmacro %}

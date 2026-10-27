@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>{% block title %}AI 자동매매{% endblock %}</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#151a22;--mute:#667085;--line:#e4e7ec;--acc:#2563eb;
+  --up:#d92d20;--down:#1d4ed8;--ok:#067647;--okbg:#ecfdf3;--warn:#b54708;--warnbg:#fffaeb;--err:#b42318;--errbg:#fef3f2}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f17;--card:#141a24;--fg:#e6e9ef;--mute:#98a2b3;--line:#253041;
+  --acc:#60a5fa;--up:#f97066;--down:#60a5fa;--ok:#47cd89;--okbg:#0b2a1c;--warn:#fdb022;--warnbg:#2b1d05;--err:#f97066;--errbg:#2d0f0c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
+.bar{max-width:880px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px}
+.bar b{font-size:16px}
+nav{display:flex;gap:4px;margin-left:auto}
+nav a,nav button{color:var(--mute);text-decoration:none;padding:6px 8px;border-radius:8px;font:inherit;background:none;border:0;cursor:pointer}
+nav a.on{color:var(--fg);background:var(--bg);font-weight:600}
+main{max-width:880px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 10px;color:var(--mute);font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line)}
+.b-ok{color:var(--ok);background:var(--okbg);border-color:transparent}
+.b-warn{color:var(--warn);background:var(--warnbg);border-color:transparent}
+.b-err{color:var(--err);background:var(--errbg);border-color:transparent}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:640px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat .k{color:var(--mute);font-size:13px}.stat .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.down{color:var(--down)}.mute{color:var(--mute);font-size:13px}
+.btn{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:10px 14px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.danger{color:var(--err)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+form.inline{display:inline}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:top}
+th{color:var(--mute);font-weight:600;font-size:13px;white-space:nowrap}
+td.nw{white-space:nowrap}
+td.r,th.r{text-align:right}
+.scroll{overflow-x:auto}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border-radius:10px;padding:12px;font-size:13px;margin:0}
+.flash{padding:10px 14px;border-radius:10px;margin-bottom:12px}
+.flash.ok{background:var(--okbg);color:var(--ok)}.flash.err{background:var(--errbg);color:var(--err)}
+.chart{width:100%;height:160px}.chart .base{stroke:var(--line);stroke-dasharray:4 4}
+.chart .line{fill:none;stroke-width:2.5}.chart .up{stroke:var(--up)}.chart .down{stroke:var(--down)}
+.dec{padding:8px 0;border-bottom:1px solid var(--line)}.dec:last-child{border:0}
+.act-BUY{color:var(--up);font-weight:700}.act-SELL{color:var(--down);font-weight:700}.act-HOLD{color:var(--mute);font-weight:700}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font:inherit}
+.grid2{display:grid;grid-template-columns:1fr;gap:0 14px}@media(min-width:640px){.grid2{grid-template-columns:1fr 1fr}}
+details summary{cursor:pointer;color:var(--mute)}
+</style>
+</head>
+<body>
+<header><div class="bar"><b>📈 AI 자동매매</b>
+{% if session.ok %}
+<nav>
+  <a href="{{ url_for('index') }}" class="{{ 'on' if request.endpoint=='index' }}">현황</a>
+  <a href="{{ url_for('history') }}" class="{{ 'on' if request.endpoint=='history' }}">기록</a>
+  <a href="{{ url_for('settings') }}" class="{{ 'on' if request.endpoint=='settings' }}">설정</a>
+  <form class="inline" method="post" action="{{ url_for('logout') }}"><button title="로그아웃">로그아웃</button></form>
+</nav>
+{% endif %}
+</div></header>
+<main>
+{% with msgs = get_flashed_messages(with_categories=true) %}{% for cat, m in msgs %}
+<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}{% endwith %}
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

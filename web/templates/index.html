@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import won, pct, run_card, order_table, log_item %}
+{% block body %}
+
+<div class="card">
+  <div class="row">
+    {% if c.mode == 'live' %}<span class="badge b-err">🔴 실계좌</span>
+    {% elif c.mode == 'mock' %}<span class="badge b-ok">모의투자</span>
+    {% else %}<span class="badge">드라이런 (주문 안 냄)</span>{% endif %}
+    <span class="badge">🧠 {{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT','consensus':'다수결'}.get(c.ai_provider, c.ai_provider) }}</span>
+
+    {% if busy %}<span class="badge b-warn" id="busy">⏳ 실행 중…</span>
+    {% elif halted %}<span class="badge b-err">🛑 손실 한도로 정지</span>
+    {% elif stopped %}<span class="badge b-warn">⏸ 정지됨</span>
+    {% else %}<span class="badge b-ok">● 자동 실행 대기</span>{% endif %}
+  </div>
+  <div class="mute" style="margin-top:6px">
+    다음 자동 실행 {{ next_run }}
+    {% if stopped or halted %} — 정지 상태라 건너뜁니다{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>봇 자산</h2>
+  {% if snap %}
+  <div class="stats">
+    <div class="stat"><div class="k">총 자산</div><div class="v">{{ won(snap.equity) }}</div></div>
+    <div class="stat"><div class="k">원금 대비</div><div class="v">{{ pct(snap.pnl_pct) }}</div></div>
+    <div class="stat"><div class="k">현금</div><div class="v">{{ won(snap.cash) }}</div></div>
+    <div class="stat"><div class="k">오늘 주문</div><div class="v">{{ orders_today }} / {{ c.max_orders_per_day }}</div></div>
+  </div>
+  {{ chart|safe }}
+  <div class="mute">원금 {{ won(c.total_krw) }} · 기준 {{ snap.ts[5:16].replace('T',' ') }}</div>
+  {% else %}
+  <div class="mute">아직 실행 기록이 없습니다. 아래 ‘AI 분석’이나 ‘잔고 새로고침’을 눌러 보세요.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>보유 종목</h2>
+  {% if snap and snap.positions %}
+  <div class="scroll"><table>
+    <tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">수익률</th></tr>
+    {% for p in snap.positions %}
+    <tr><td>{{ p.name }}<div class="mute">{{ p.code }}</div></td><td class="r">{{ p.qty }}</td>
+      <td class="r">{{ "{:,}".format(p.avg_price) }}</td><td class="r">{{ "{:,}".format(p.now_price) }}</td>
+      <td class="r">{{ pct(p.pnl_pct) }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <div class="mute">손절 {{ c.stop_loss_pct }}% · 익절 +{{ c.take_profit_pct }}% 자동 적용</div>
+  {% else %}<div class="mute">봇이 보유한 종목이 없습니다.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>조작</h2>
+  <div class="row">
+    <form class="inline" method="post" action="{{ url_for('action', name='analyze') }}">
+      <button class="btn" {{ 'disabled' if busy }}>🧠 AI 분석 (주문 없음)</button></form>
+    <form class="inline" method="post" action="{{ url_for('action', name='trade') }}"
+      onsubmit="return confirm('지금 매매 사이클을 실행할까요?{{ ' 실계좌 주문이 나갑니다!' if c.mode=='live' }}')">
+      <button class="btn pri" {{ 'disabled' if busy or stopped or halted }}>🚀 지금 매매 실행</button></form>
+    <form class="inline" method="post" action="{{ url_for('action', name='refresh') }}">
+      <button class="btn">↻ 잔고 새로고침</button></form>
+    {% if stopped or halted %}
+    <form class="inline" method="post" action="{{ url_for('action', name='resume') }}"
+      onsubmit="return confirm('정지를 해제하고 자동 매매를 재개할까요?')">
+      <button class="btn">▶ 재개</button></form>
+    {% else %}
+    <form class="inline" method="post" action="{{ url_for('action', name='stop') }}">
+      <button class="btn danger">⏸ 정지</button></form>
+    {% endif %}
+  </div>
+  <div class="mute" style="margin-top:8px">‘매매 실행’은 정규장 시간에만 주문합니다. 실행에는 20초~1분 정도 걸려요.</div>
+</div>
+
+<div class="card">
+  <h2>최근 AI 판단</h2>
+  {% if runs %}{{ run_card(runs[0]) }}{% else %}<div class="mute">아직 없습니다.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>최근 주문</h2>
+  {{ order_table(orders) }}
+</div>
+
+<div class="card">
+  <h2>실행 로그</h2>
+  {% for l in logs %}{{ log_item(l) }}{% else %}<div class="mute">없음</div>{% endfor %}
+  <div style="margin-top:8px"><a href="{{ url_for('history') }}">전체 기록 →</a></div>
+</div>
+
+<script>
+// 실행 중이면 끝날 때까지 5초마다 확인 후 새로고침
+(function(){
+  if (!document.getElementById('busy')) return;
+  const t = setInterval(async () => {
+    try {
+      const r = await fetch('{{ url_for("api_status") }}');
+      const s = await r.json();
+      if (!s.busy) { clearInterval(t); location.reload(); }
+    } catch (e) {}
+  }, 5000);
+})();
+</script>
+{% endblock %}

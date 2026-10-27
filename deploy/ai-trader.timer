@@ -1,0 +1,10 @@
+[Unit]
+Description=AI 자동매매 — 평일 10:00, 14:30 (KST)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 10:00:00 Asia/Seoul
+OnCalendar=Mon..Fri *-*-* 14:30:00 Asia/Seoul
+Persistent=false
+
+[Install]
+WantedBy=timers.target

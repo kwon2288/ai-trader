@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_macros.html" import run_card, order_table, log_item %}
+{% block title %}기록 · AI 자동매매{% endblock %}
+{% block body %}
+<div class="card">
+  <h2>주문 내역</h2>
+  {{ order_table(orders) }}
+</div>
+
+<div class="card">
+  <h2>AI 판단 기록</h2>
+  {% for r in runs %}
+  <details {{ 'open' if loop.first }} style="padding:6px 0;border-bottom:1px solid var(--line)">
+    <summary>{{ r.ts[5:16].replace('T',' ') }} — {{ r.market_view[:40] }}{{ '…' if r.market_view|length > 40 }}</summary>
+    <div style="padding-top:6px">{{ run_card(r) }}</div>
+  </details>
+  {% else %}<div class="mute">없음</div>{% endfor %}
+</div>
+
+<div class="card">
+  <h2>실행 로그</h2>
+  {% for l in logs %}{{ log_item(l) }}{% else %}<div class="mute">없음</div>{% endfor %}
+</div>
+{% endblock %}

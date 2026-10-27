@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}설정 · AI 자동매매{% endblock %}
+{% block body %}
+<form method="post">
+<div class="card">
+  <h2>예산 · 위험관리</h2>
+  <div class="grid2">
+  {% for key, label, val in fields %}
+    <div><label for="{{ key }}">{{ label }}</label>
+      <input id="{{ key }}" name="{{ key }}" value="{{ val }}" inputmode="decimal" required></div>
+  {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>AI</h2>
+  <label for="provider">판단에 쓸 AI</label>
+  <select id="provider" name="provider">
+  {% for k, v in providers.items() %}
+    <option value="{{ k }}" {{ 'selected' if c.ai_provider == k }}>{{ v }}{% if k != 'consensus' and not keys[k] %} — 키 없음{% endif %}</option>
+  {% endfor %}
+  </select>
+  <div class="mute" style="margin-top:6px">
+    API 키: {% for k, v in key_labels.items() %}{{ v }} {{ '✅' if keys[k] else '❌' }}{{ ' · ' if not loop.last }}{% endfor %}
+    — 키는 서버 <code>.env</code> 에서만 넣을 수 있어요.
+  </div>
+  <div class="grid2">
+  {% for key, label, options in model_fields %}
+    <div><label for="{{ key }}">{{ label }}</label>
+      <input id="{{ key }}" name="{{ key }}" list="dl_{{ key }}" value="{{ c.ai_models[key.split('_')[0]] }}">
+      <datalist id="dl_{{ key }}">{% for m in options %}<option value="{{ m }}">{% endfor %}</datalist></div>
+  {% endfor %}
+    <div><label for="order_type">주문 방식</label>
+      <select id="order_type" name="order_type">
+      {% for k, v in order_types.items() %}<option value="{{ k }}" {{ 'selected' if raw.order.type == k }}>{{ v }}</option>{% endfor %}
+      </select></div>
+  </div>
+  <div class="mute" style="margin-top:6px">다수결은 AI 수만큼 비용이 들고, 과반이 같은 의견일 때만 매수·매도합니다.</div>
+</div>
+
+<div class="card">
+  <h2>분석 대상 종목</h2>
+  <label for="symbols">6자리 종목코드, 쉼표나 줄바꿈으로 구분 (최대 40개)</label>
+  <textarea id="symbols" name="symbols" rows="6">{{ raw.universe.symbols|join(', ') }}</textarea>
+  <div class="mute" style="margin-top:6px">종목당 최대 금액보다 비싼 종목은 자동으로 제외됩니다.</div>
+</div>
+
+<div class="row" style="margin-bottom:14px"><button class="btn pri">저장</button></div>
+</form>
+
+<div class="card">
+  <h2>서버에서만 바꿀 수 있는 항목</h2>
+  <div class="mute">
+    실행 모드: <b>{{ c.mode }}</b> · 앱키 · 계좌번호 · 실계좌 전환은 보안상 웹에서 바꿀 수 없습니다.<br>
+    서버의 <code>/opt/ai-trader/.env</code> 를 수정한 뒤 <code>systemctl restart ai-trader-web</code> 하세요.
+  </div>
+</div>
+{% endblock %}

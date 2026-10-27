@@ -1,0 +1,10 @@
+[Unit]
+Description=AI 자동매매 1회 실행
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ai-trader
+ExecStart=/opt/ai-trader/.venv/bin/python run.py trade
+TimeoutStartSec=600
