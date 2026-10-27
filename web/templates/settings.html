@@ -1,19 +1,5 @@
 {% extends "base.html" %}
-{% block title %}설정 · AI 자동매매<script>
-// '직접 입력…'을 고르면 입력칸을 보여준다
-document.querySelectorAll('.model-select').forEach(function (sel) {
-  var box = sel.parentElement.querySelector('.model-custom');
-  function sync() {
-    var on = sel.value === '__custom__';
-    box.style.display = on ? 'block' : 'none';
-    box.required = on;
-    if (on) box.focus();
-  }
-  sel.addEventListener('change', sync);
-  sync();
-});
-</script>
-{% endblock %}
+{% block title %}설정 · AI 자동매매{% endblock %}
 {% block body %}
 <form method="post">
 <div class="card">
