@@ -47,9 +47,23 @@
 
 <div class="card">
   <h2>분석 대상 종목</h2>
-  <label for="symbols">6자리 종목코드, 쉼표나 줄바꿈으로 구분 (최대 40개)</label>
-  <textarea id="symbols" name="symbols" rows="6">{{ raw.universe.symbols|join(', ') }}</textarea>
-  <div class="mute" style="margin-top:6px">종목당 최대 금액보다 비싼 종목은 자동으로 제외됩니다.</div>
+  <label for="symbols">핵심 종목 — 항상 분석 (6자리 코드, 쉼표나 줄바꿈으로 구분, 최대 40개)</label>
+  <textarea id="symbols" name="symbols" rows="5">{{ raw.universe.symbols|join(', ') }}</textarea>
+  <div class="mute" style="margin-top:6px">종목당 최대 금액보다 비싼 종목은 매수 후보에서 빠집니다. 보유 중인 종목은 목록에서 지워도 계속 분석해요.</div>
+
+  <h2 style="margin-top:18px">자동 선정 — 매일 갱신</h2>
+  <div class="mute">그날 첫 실행 때 전 종목에서 관리·정지·투자유의·경고·단기과열·우선주·스팩을 빼고,
+    가격·시가총액 조건을 통과한 종목 중 <b>전일 거래대금 상위</b>를 고릅니다. (NH 나무증권 전용)</div>
+  <div class="grid2">
+  {% for key, label, val in auto_fields %}
+    <div><label for="{{ key }}">{{ label }}</label>
+      <input id="{{ key }}" name="{{ key }}" value="{{ val }}" inputmode="numeric" required></div>
+  {% endfor %}
+  </div>
+  <label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--fg)">
+    <input type="checkbox" name="auto_include_etf" style="width:auto" {{ 'checked' if raw.universe.auto_include_etf }}>
+    ETF도 포함 (레버리지·인버스·채권·금리형은 항상 제외)
+  </label>
 </div>
 
 <div class="row" style="margin-bottom:14px"><button class="btn pri">저장</button></div>

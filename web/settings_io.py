@@ -17,6 +17,13 @@ FIELDS = [
     ("risk", "min_confidence", float, 0, 1, "최소 AI 확신도 (0~1)"),
     ("risk", "min_hold_days", int, 0, 60, "최소 보유일"),
 ]
+AUTO_FIELDS = [
+    ("universe", "auto_count", int, 0, 30, "자동 선정 종목 수 (0 = 끄기)"),
+    ("universe", "auto_min_cap_eok", int, 0, 10_000_000, "최소 시가총액 (억원)"),
+    ("universe", "auto_min_price", int, 0, 1_000_000, "최소 주가 (원)"),
+    ("universe", "auto_scan_pool", int, 20, 1000, "시세 조회 범위 (시총 상위 N개)"),
+]
+DEFAULTS = {"auto_count": 10, "auto_min_cap_eok": 3000, "auto_min_price": 1000, "auto_scan_pool": 200}
 ORDER_TYPES = {"market": "시장가", "limit": "지정가"}
 PROVIDER_CHOICES = {
     "claude": "Claude",
@@ -82,7 +89,7 @@ def _set_symbols(text: str, symbols: list[str]) -> str:
 def validate_and_write(path: Path, form: dict) -> list[str]:
     """폼 값을 검증해 저장. 오류 메시지 목록 반환 (비어 있으면 성공)."""
     errors, values = [], {}
-    for sec, key, typ, lo, hi, label in FIELDS:
+    for sec, key, typ, lo, hi, label in FIELDS + AUTO_FIELDS:
         raw = str(form.get(key, "")).replace(",", "").replace("_", "").strip()
         try:
             v = typ(float(raw)) if typ is int else typ(raw)
@@ -132,6 +139,7 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     # 예전 설정의 model 키 제거 (claude_model 로 대체)
     text = re.sub(r"^model\s*=.*\n", "", text, flags=re.M)
     text = _set_symbols(text, list(dict.fromkeys(symbols)))
+    text = _set(text, "universe", "auto_include_etf", form.get("auto_include_etf") == "on")
     tomllib.loads(text)  # 깨진 파일은 저장하지 않음
     tmp = path.with_suffix(".toml.tmp")
     tmp.write_text(text, encoding="utf-8")

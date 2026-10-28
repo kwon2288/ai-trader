@@ -83,22 +83,28 @@ class Bot:
                     bot_codes.pop(code)
         held = {c: h for c, h in bal.holdings.items() if c in bot_codes}
 
-        for code in dict.fromkeys(cfg.symbols + list(held)):
-            try:
-                q = self.broker.quote(code)
-                ind = indicators.compute(self.broker.daily(code, 80))
-            except Exception as e:  # noqa: BLE001
-                self.say(f"⚠ {code} 데이터 조회 실패: {e}")
-                continue
-            quotes[code] = q
-            candidates.append({
-                "code": code, "name": q.name, "market": q.market, "sector": q.sector,
-                "price": q.price, "today_change_pct": q.change_pct,
-                "per": q.per or None, "pbr": q.pbr or None, "foreign_pct": q.foreign_pct,
-                "from_52w_high_pct": round((q.price / q.w52_high - 1) * 100, 1) if q.w52_high else None,
-                "warnings": q.warnings, "held": code in held,
-                "affordable": q.price <= cfg.max_per_position_krw, **ind,
-            })
+        def collect(codes, source):
+            for code in codes:
+                if code in quotes:
+                    continue
+                try:
+                    q = self.broker.quote(code)
+                    ind = indicators.compute(self.broker.daily(code, 80))
+                except Exception as e:  # noqa: BLE001
+                    self.say(f"⚠ {code} 데이터 조회 실패: {e}")
+                    continue
+                quotes[code] = q
+                candidates.append({
+                    "code": code, "name": q.name, "market": q.market, "sector": q.sector,
+                    "source": "held" if code in held else source,   # core=직접 지정, auto=오늘 자동 선정
+                    "price": q.price, "today_change_pct": q.change_pct,
+                    "per": q.per or None, "pbr": q.pbr or None, "foreign_pct": q.foreign_pct,
+                    "from_52w_high_pct": round((q.price / q.w52_high - 1) * 100, 1) if q.w52_high else None,
+                    "warnings": q.warnings, "held": code in held,
+                    "affordable": q.price <= cfg.max_per_position_krw, **ind,
+                })
+
+        collect(list(held) + cfg.symbols, "core")
         if not quotes:
             self.say("데이터를 하나도 받지 못해 종료합니다.")
             return self._out()
@@ -107,6 +113,12 @@ class Bot:
         if not market_open and not (force or analyze_only):
             self.say("💤 지금은 정규장이 아닙니다 (휴장일/장외 시간). 종료합니다.")
             return self._out()
+
+        # 자동 선정 종목 (그날 첫 실행 때 검색, 실패하면 직전 목록)
+        if cfg.auto_count > 0:
+            from . import universe
+            auto = universe.ensure_today(cfg, self.broker, self.j, say=self.say)
+            collect([a["code"] for a in auto], "auto")
 
         # 2) 장부 / 손실 한도
         for c, h in held.items():

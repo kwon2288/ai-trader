@@ -36,7 +36,12 @@ class Config:
     ai_provider: str                 # claude | gemini | openai | consensus
     ai_models: dict[str, str]        # provider → 모델명
     ai_max_tokens: int
-    symbols: list[str]
+    symbols: list[str]                 # 핵심 종목 (항상 분석)
+    auto_count: int = 10               # 자동 선정 종목 수 (0 = 끔)
+    auto_min_price: int = 1000
+    auto_min_cap_eok: int = 3000       # 최소 시가총액(억원)
+    auto_include_etf: bool = False
+    auto_scan_pool: int = 200          # 시총 상위 몇 개를 시세 조회할지
     # 실행 모드: "dry"(주문 안 냄) | "mock"(모의투자 주문) | "live"(실계좌 주문)
     mode: str = "dry"
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
@@ -96,6 +101,11 @@ def load(config_path: Path | None = None) -> Config:
         },
         ai_max_tokens=int(a.get("max_tokens", 4000)),
         symbols=[str(s).zfill(6) for s in raw["universe"]["symbols"]],
+        auto_count=int(raw["universe"].get("auto_count", 10)),
+        auto_min_price=int(raw["universe"].get("auto_min_price", 1000)),
+        auto_min_cap_eok=int(raw["universe"].get("auto_min_cap_eok", 3000)),
+        auto_include_etf=bool(raw["universe"].get("auto_include_etf", False)),
+        auto_scan_pool=int(raw["universe"].get("auto_scan_pool", 200)),
         mode=mode,
     )
     if os.environ.get("TRADER_DATA_DIR"):

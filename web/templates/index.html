@@ -74,6 +74,34 @@
 </div>
 
 <div class="card">
+  <h2>분석 대상 종목</h2>
+  <div class="mute">핵심 {{ c.symbols|length }}종목 (직접 지정) + 자동 선정
+    {% if c.auto_count > 0 %}{{ c.auto_count }}종목{% else %}꺼짐{% endif %}</div>
+  {% if c.auto_count > 0 %}
+    {% if auto and auto['items'] %}
+    <div class="mute" style="margin:6px 0">
+      {{ auto.ts[5:16].replace('T',' ') }} 검색 · 1차 통과 {{ auto.prefilter_pass }} → 조회 {{ auto.scanned }}
+      {% if auto.date != today %}<span class="badge b-warn">오늘 첫 실행 때 갱신 예정</span>{% endif %}
+    </div>
+    <div class="scroll"><table>
+      <tr><th>종목</th><th class="r">가격</th><th class="r">전일 거래대금</th><th class="r">시총</th></tr>
+      {% for it in auto['items'] %}
+      <tr><td>{{ it.name }}{% if it.etf %} <span class="badge">ETF</span>{% endif %}<div class="mute">{{ it.code }}</div></td>
+        <td class="r">{{ "{:,}".format(it.price) }}</td>
+        <td class="r">{{ "{:,}".format(it.prev_value_eok) }}억</td>
+        <td class="r">{{ "{:,}".format(it.cap_eok) }}억</td></tr>
+      {% endfor %}
+    </table></div>
+    {% else %}
+    <div class="mute" style="margin:6px 0">아직 검색 전이에요. 오늘 첫 실행 때 자동으로 찾거나, 아래 버튼으로 지금 찾을 수 있어요.</div>
+    {% endif %}
+    <form class="inline" method="post" action="{{ url_for('action', name='scan') }}">
+      <button class="btn" style="margin-top:8px" {{ 'disabled' if busy }}>🔎 종목 다시 찾기</button></form>
+  {% endif %}
+  <div style="margin-top:6px"><a href="{{ url_for('settings') }}">조건 바꾸기 →</a></div>
+</div>
+
+<div class="card">
   <h2>최근 AI 판단</h2>
   {% if runs %}{{ run_card(runs[0]) }}{% else %}<div class="mute">아직 없습니다.</div>{% endif %}
 </div>

@@ -221,6 +221,19 @@ class NHBroker:
         bars = self.daily(code, 2)
         return "1" if bars and bars[-1]["date"] == datetime.now(KST).strftime("%Y%m%d") else ""
 
+    def scan_quote(self, code: str) -> dict:
+        """자동 종목 검색용 가벼운 조회 — 현재가 API 1회 (장상태 판단·일봉 없음)."""
+        o = self._post("/krstock/quote/v1/currentPrice", {"iem_cd": code, "market_cd": "KRX"}).get("Output_0") or {}
+        warns = []
+        if (o.get("invt_epmd_yn") or "").strip() == "Y" or (o.get("sltr_yn") or "").strip() == "Y":
+            warns.append("유의/정리")
+        if (o.get("mrkt_alrm_code") or "").strip() in {"1", "2", "3", "4"}:
+            warns.append("경고")
+        if (o.get("short_over_code") or "").strip() in {"1", "2", "3"}:
+            warns.append("단기과열")
+        return {"price": _int(o.get("stck_prpr")) or _int(o.get("stck_prdy_clpr")),
+                "prev_value": _int(o.get("prdy_tr_pbmn")), "warnings": warns}
+
     def daily(self, code: str, n: int = 80) -> list[dict]:
         """일봉 (오래된 → 최신 순)."""
         data = self._post("/krstock/quote/v1/currentDaily", {

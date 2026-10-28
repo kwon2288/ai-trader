@@ -86,3 +86,20 @@ def refresh_balance(cfg: Config) -> dict:
     }
     j.save_snapshot(cfg.mode, snap)
     return snap
+
+
+def run_scan(cfg: Config, source: str = "web") -> str:
+    """자동 종목 다시 찾기 (잠금 + 실행 로그)."""
+    from . import universe
+    with run_lock(cfg):
+        j = Journal(cfg.db_path)
+        try:
+            r = universe.scan(cfg, make_broker(cfg), j)
+            out = (f"🔎 자동 종목 검색: 1차 통과 {r['prefilter_pass']} → 시세 조회 {r['scanned']} → "
+                   f"선정 {len(r['items'])}종목 ({r['seconds']}초)\n" +
+                   "\n".join(f"  {i}. {it['name']}({it['code']}) {it['price']:,}원 · 전일 거래대금 {it['prev_value_eok']:,}억"
+                             for i, it in enumerate(r["items"], 1)))
+        except Exception as e:  # noqa: BLE001
+            out = f"❌ 자동 종목 검색 실패: {e}"
+        j.add_log(cfg.mode, "scan", source, out)
+        return out

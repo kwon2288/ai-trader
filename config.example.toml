@@ -37,9 +37,16 @@ gemini_model = "gemini-3.8-flash"    # 저렴: gemini-3.5-flash-lite
 openai_model = "gpt-6.1-sol"         # 저렴: gpt-6-luna
 max_tokens = 4000
 
-# 분석 대상 종목 (6자리 코드). AI는 이 목록 안에서만 고릅니다.
-# 현재가가 max_per_position_krw 보다 비싼 종목은 자동으로 빠집니다.
+# 분석 대상 = 핵심 종목(symbols, 항상 분석) + 자동 선정 종목(매일 갱신)
+# 현재가가 max_per_position_krw 보다 비싼 종목은 매수 후보에서 빠집니다.
 [universe]
+# 자동 선정: 그날 첫 실행 때 전 종목에서 조건 검색 → 전일 거래대금 상위 N개 (NH 전용)
+auto_count = 10            # 자동 선정 종목 수 (0 = 끄기)
+auto_min_price = 1000      # 최소 주가 (원)
+auto_min_cap_eok = 3000    # 최소 시가총액 (억원)
+auto_include_etf = false   # ETF 포함 여부 (레버리지·인버스·채권형은 항상 제외)
+auto_scan_pool = 200       # 시총 상위 몇 개를 시세 조회할지 (클수록 오래 걸림, 초당 4건)
+# 핵심 종목 (6자리 코드)
 symbols = [
   "069500",  # KODEX 200
   "229200",  # KODEX 코스닥150

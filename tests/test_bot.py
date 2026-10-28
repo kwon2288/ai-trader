@@ -22,7 +22,7 @@ def make_cfg(tmp: Path, mode="mock", **kw) -> Config:
                 max_orders_per_day=4, min_confidence=0.6, min_hold_days=2,
                 order_type="market", ai_provider="claude", ai_models={"claude": "x", "gemini": "y", "openai": "z"},
                 ai_max_tokens=100,
-                symbols=["000001", "000002", "000003"], mode=mode, data_dir=tmp)
+                symbols=["000001", "000002", "000003"], mode=mode, data_dir=tmp, auto_count=0)
     base.update(kw)
     return Config(**base)
 

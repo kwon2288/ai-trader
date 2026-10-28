@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from trader import config as cfgmod  # noqa: E402
 from trader.journal import KST, Journal  # noqa: E402
-from trader.runner import Busy, refresh_balance, run_cycle  # noqa: E402
+from trader import universe  # noqa: E402
+from trader.runner import Busy, refresh_balance, run_cycle, run_scan  # noqa: E402
 from web import settings_io  # noqa: E402
 
 app = Flask(__name__)
@@ -76,7 +77,10 @@ def _start_job(kind: str) -> str | None:
 
     def work():
         try:
-            run_cycle(cfg(), analyze_only=(kind == "analyze"), force=False, source="web")
+            if kind == "scan":
+                run_scan(cfg(), source="web")
+            else:
+                run_cycle(cfg(), analyze_only=(kind == "analyze"), force=False, source="web")
         except Busy:
             pass
         finally:
@@ -166,6 +170,7 @@ def index():
         chart=equity_svg(j.equity_series(c.mode), c.total_krw),
         runs=j.runs_with_decisions(c.mode, 5), orders=j.orders(c.mode, 10),
         logs=j.logs(5), orders_today=j.orders_today(c.mode),
+        auto=universe.saved(j), today=now.strftime("%Y-%m-%d"),
     )
 
 
@@ -191,8 +196,10 @@ def settings():
             return redirect(url_for("settings"))
     raw = settings_io.read(CONFIG_PATH)
     fields = [(key, label, raw.get(sec, {}).get(key, "")) for sec, key, _t, _lo, _hi, label in settings_io.FIELDS]
+    auto_fields = [(key, label, raw.get(sec, {}).get(key, settings_io.DEFAULTS.get(key, "")))
+                   for sec, key, _t, _lo, _hi, label in settings_io.AUTO_FIELDS]
     from trader.analyst import PROVIDERS, available
-    return render_template("settings.html", c=cfg(), fields=fields, raw=raw,
+    return render_template("settings.html", c=cfg(), fields=fields, raw=raw, auto_fields=auto_fields,
                            order_types=settings_io.ORDER_TYPES, providers=settings_io.PROVIDER_CHOICES,
                            model_fields=settings_io.MODEL_FIELDS,
                            keys={p: available(p) for p in PROVIDERS},
@@ -211,10 +218,12 @@ def action(name):
         c.stop_file.unlink(missing_ok=True)
         Journal(c.db_path).set(f"halted_{c.mode}", "0")
         flash("▶ 재개했습니다.", "ok")
-    elif name in ("analyze", "trade"):
+    elif name in ("analyze", "trade", "scan"):
         err = _start_job(name)
-        flash(err or ("🧠 AI 분석을 시작했습니다 (주문 없음)." if name == "analyze"
-                      else "🚀 매매 사이클을 시작했습니다."), "err" if err else "ok")
+        msg = {"analyze": "🧠 AI 분석을 시작했습니다 (주문 없음).",
+               "trade": "🚀 매매 사이클을 시작했습니다.",
+               "scan": "🔎 자동 종목 검색을 시작했습니다 (1분 정도)."}[name]
+        flash(err or msg, "err" if err else "ok")
     elif name == "refresh":
         try:
             refresh_balance(c)

@@ -3,6 +3,7 @@
 
   python run.py check     # 연결·계좌·잔고 확인 (주문 없음)
   python run.py accounts  # (NH) 계좌 목록 · 국내주식 사용 가능 여부
+  python run.py scan      # 자동 선정 종목 지금 다시 찾기 (평소엔 그날 첫 실행 때 자동)
   python run.py aitest    # AI 키·모델 연결 확인 (Claude/Gemini/ChatGPT)
   python run.py analyze   # AI 분석 결과만 보기 (주문 없음, 장외 시간에도 가능)
   python run.py trade     # 실제 사이클 실행 — TRADING_MODE(dry/mock/live)에 따라 동작
@@ -60,7 +61,7 @@ def aitest(cfg) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="AI 자동매매")
-    p.add_argument("cmd", choices=["check", "accounts", "aitest", "analyze", "trade", "report", "stop", "resume"])
+    p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume"])
     p.add_argument("--force", action="store_true", help="장 상태 확인 무시 (테스트용)")
     args = p.parse_args()
 
@@ -116,6 +117,20 @@ def main() -> None:
         broker = make_broker(cfg)
     except BrokerError as e:
         sys.exit(f"증권사 연결 설정 오류: {e}")
+
+    if args.cmd == "scan":
+        from trader import universe
+        from trader.journal import Journal
+        if cfg.auto_count <= 0:
+            sys.exit("config.toml 의 [universe] auto_count 가 0 이라 자동 선정이 꺼져 있습니다.")
+        print(f"🔎 검색 중… (시총 상위 최대 {cfg.auto_scan_pool}개 시세 조회)")
+        r = universe.scan(cfg, broker, Journal(cfg.db_path),
+                          progress=lambda i, n: print(f"  {i}/{n}", end="\r", flush=True))
+        print(f"1차 통과 {r['prefilter_pass']}종목 → 시세 조회 {r['scanned']}종목 → 선정 {len(r['items'])}종목 ({r['seconds']}초)")
+        for i, it in enumerate(r["items"], 1):
+            print(f"  {i:2d}. {it['name']}({it['code']}) {it['price']:,}원 · 전일 거래대금 {it['prev_value_eok']:,}억"
+                  f" · 시총 {it['cap_eok']:,}억{' · ETF' if it['etf'] else ''}")
+        return
 
     if args.cmd == "check":
         print(f"모드: {cfg.mode} | 서버: {broker.env} | 계좌: {broker.account}")
