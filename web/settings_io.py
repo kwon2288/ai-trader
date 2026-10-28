@@ -30,6 +30,7 @@ PROVIDER_CHOICES = {
     "gemini": "Gemini",
     "openai": "ChatGPT",
     "consensus": "다수결 (키가 있는 AI 모두에게 묻고 과반 의견만 실행)",
+    "rules": "규칙만 — AI 없음 (무료)",
 }
 MODEL_FIELDS = [  # (설정키, 라벨, 추천 목록)
     ("claude_model", "Claude 모델", [
@@ -134,6 +135,7 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
         text = _set(text, sec, key, v)
     text = _set(text, "order", "type", order_type)
     text = _set(text, "ai", "provider", provider)
+    text = _set(text, "ai", "hybrid", form.get("hybrid") == "on")
     for key, m in models.items():
         text = _set(text, "ai", key, m)
     # 예전 설정의 model 키 제거 (claude_model 로 대체)

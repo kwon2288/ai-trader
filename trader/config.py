@@ -42,15 +42,19 @@ class Config:
     auto_min_cap_eok: int = 3000       # 최소 시가총액(억원)
     auto_include_etf: bool = False
     auto_scan_pool: int = 200          # 시총 상위 몇 개를 시세 조회할지
+    ai_hybrid: bool = False            # 규칙으로 먼저 거르고 신호 난 종목만 AI 확인 (토큰 절약)
     # 실행 모드: "dry"(주문 안 냄) | "mock"(모의투자 주문) | "live"(실계좌 주문)
     mode: str = "dry"
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
 
     @property
     def ai_label(self) -> str:
+        if self.ai_provider == "rules":
+            return "규칙만 (AI 없음)"
         if self.ai_provider == "consensus":
-            return "다수결(키가 있는 AI 전부)"
-        return f"{self.ai_provider} ({self.ai_models.get(self.ai_provider, '?')})"
+            return "다수결(키가 있는 AI 전부)" + (" + 규칙 필터" if self.ai_hybrid else "")
+        return (f"{self.ai_provider} ({self.ai_models.get(self.ai_provider, '?')})"
+                + (" + 규칙 필터" if self.ai_hybrid else ""))
 
     @property
     def db_path(self) -> Path:
@@ -100,6 +104,7 @@ def load(config_path: Path | None = None) -> Config:
             "openai": a.get("openai_model") or "gpt-6.1-sol",
         },
         ai_max_tokens=int(a.get("max_tokens", 4000)),
+        ai_hybrid=bool(a.get("hybrid", True)),
         symbols=[str(s).zfill(6) for s in raw["universe"]["symbols"]],
         auto_count=int(raw["universe"].get("auto_count", 10)),
         auto_min_price=int(raw["universe"].get("auto_min_price", 1000)),

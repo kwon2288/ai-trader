@@ -17,9 +17,15 @@
   <label for="provider">판단에 쓸 AI</label>
   <select id="provider" name="provider">
   {% for k, v in providers.items() %}
-    <option value="{{ k }}" {{ 'selected' if c.ai_provider == k }}>{{ v }}{% if k != 'consensus' and not keys[k] %} — 키 없음{% endif %}</option>
+    <option value="{{ k }}" {{ 'selected' if c.ai_provider == k }}>{{ v }}{% if k not in ('consensus', 'rules') and not keys[k] %} — 키 없음{% endif %}</option>
   {% endfor %}
   </select>
+  <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;color:var(--fg)">
+    <input type="checkbox" name="hybrid" style="width:auto;margin-top:3px" {{ 'checked' if c.ai_hybrid }}>
+    <span>규칙으로 먼저 거르기 (토큰 절약)
+      <span class="mute" style="display:block">추세·과열 규칙이 매수/매도 신호를 찾은 종목만 AI에게 확인받고,
+        신호가 없으면 AI를 부르지 않아요. ‘규칙만’을 고르면 이 설정과 상관없이 AI를 쓰지 않아요.</span></span>
+  </label>
   <div class="mute" style="margin-top:6px">
     API 키: {% for k, v in key_labels.items() %}{{ v }} {{ '✅' if keys[k] else '❌' }}{{ ' · ' if not loop.last }}{% endfor %}
     — 키는 서버 <code>.env</code> 에서만 넣을 수 있어요.

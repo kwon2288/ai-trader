@@ -34,6 +34,8 @@ SYSTEM = """당신은 한국 주식시장(KRX)의 신중한 소액 포트폴리�
 - 손절·익절은 시스템이 자동으로 처리하므로, 당신은 추세 판단에 집중하세요.
 - 후보의 source 는 core(사용자가 고른 종목), auto(오늘 거래대금 상위로 자동 선정), held(보유 중)입니다.
   auto 종목은 거래가 활발하다는 뜻일 뿐 좋은 종목이라는 뜻이 아니니, 지표로만 판단하세요.
+- rule_signal 이 있으면 규칙이 1차로 고른 매수/매도 후보입니다. 그대로 따르지 말고 지표를 다시 보고
+  확인되면 그 행동을, 근거가 약하면 HOLD 를 내세요. (후보 목록에 있는 종목만 판단하세요)
 - confidence 는 0~1 사이로, 근거가 강할 때만 0.7 이상을 주세요.
 - reason 은 한국어 한두 문장으로, 어떤 지표 때문인지 구체적으로 쓰세요."""
 
@@ -327,11 +329,14 @@ def available(provider: str) -> bool:
 
 def make_analyst(cfg):
     prov = cfg.ai_provider
+    if prov == "rules":
+        from .signals import RulesAnalyst
+        return RulesAnalyst()
     if prov == "consensus":
         members = [_CLASSES[p](cfg.ai_models[p], cfg.ai_max_tokens) for p in PROVIDERS if available(p)]
         return ConsensusAnalyst(members)
     if prov not in _CLASSES:
-        raise RuntimeError(f"알 수 없는 AI: {prov} (claude/gemini/openai/consensus)")
+        raise RuntimeError(f"알 수 없는 AI: {prov} (claude/gemini/openai/consensus/rules)")
     if not available(prov):
         raise RuntimeError(f".env 에 {PROVIDERS[prov]['env']} 가 없습니다 ({PROVIDERS[prov]['label']} 사용 시 필요)")
     return _CLASSES[prov](cfg.ai_models[prov], cfg.ai_max_tokens)

@@ -156,7 +156,32 @@ class Bot:
                         self.j.close_position(c)
                         held.pop(c)
 
-        # 4) AI 판단
+        # 4) 하이브리드: 규칙이 먼저 신호를 찾고, 신호 난 종목만 AI 에게 확인 (신호 없으면 AI 생략)
+        allowed = None                       # None = 모든 후보 허용
+        is_rules = getattr(self.analyst, "name", "") == "rules"
+        if cfg.ai_hybrid and not is_rules:
+            from . import signals
+            cash_now = min(self.bot_cash, bal.orderable_cash) if cfg.mode != "dry" else self.bot_cash
+            cheapest = min((c["price"] for c in candidates if not c["held"] and c["affordable"]), default=0)
+            can_buy = len(held) < cfg.max_positions and cheapest > 0 and cash_now >= cheapest
+            sig = signals.evaluate(candidates, can_buy=can_buy)
+            if not sig:
+                why = "" if can_buy else " (매수 여력·빈 자리 없음 → 매도 신호만 확인)"
+                self.say(f"📏 규칙 신호 없음{why} — AI 호출 생략 ({len(candidates)}종목 확인, 토큰 0)")
+                self.j.finish_run(run_id, "규칙 신호 없음 — AI 호출 생략",
+                                  {"_provider": "규칙 필터", "decisions": []})
+                return self._out()
+            for c in candidates:
+                if c["code"] in sig:
+                    c["rule_signal"] = sig[c["code"]]["reason"]
+            sent = [c for c in candidates if c["code"] in sig]
+            allowed = set(sig)
+            self.say(f"📏 규칙 신호 {len(sent)}종목 → AI 확인 (전체 {len(candidates)}종목 중): "
+                     + ", ".join(f"{c['name']}({'매도' if sig[c['code']]['type'].startswith('SELL') else '매수'})"
+                                 for c in sent))
+            candidates = sent
+
+        # 5) AI 판단
         ctx = {
             "today": now().strftime("%Y-%m-%d %A"),
             "rules": {
@@ -188,7 +213,7 @@ class Bot:
         self.say(f"🧠 {who} 시장판단: {result.get('market_view', '')}")
         decisions = [d for d in result.get("decisions", []) if isinstance(d, dict)]
 
-        # 5) 위험관리 필터 → 실행 (매도 먼저, 그다음 확신도 높은 매수)
+        # 6) 위험관리 필터 → 실행 (매도 먼저, 그다음 확신도 높은 매수)
         def note(d, outcome):
             self.j.add_decision(run_id, d, outcome)
             q = quotes.get(d.get("code"))
@@ -199,6 +224,10 @@ class Bot:
         for d in decisions:
             d["code"] = str(d.get("code", "")).zfill(6)
             d["confidence"] = float(d.get("confidence") or 0)
+        if allowed is not None:            # 하이브리드: 신호 난 종목만 매매 대상
+            for d in [d for d in decisions if d["code"] not in allowed and d.get("action") != "HOLD"]:
+                note(d, "무시 (규칙 신호 없는 종목)")
+            decisions = [d for d in decisions if d["code"] in allowed]
 
         for d in [d for d in decisions if d.get("action") == "SELL"]:
             c = d["code"]
@@ -259,7 +288,7 @@ class Bot:
                 note(d, "유지")
 
         self.j.finish_run(run_id, result.get("market_view", ""), result)
-        if "_usage" in result:
+        if result.get("_usage"):
             u = result["_usage"]
             self.say(f"(AI 토큰 사용: 입력 {u['in']:,} / 출력 {u['out']:,})")
         return self._out()
