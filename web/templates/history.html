@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% from "_macros.html" import run_card, order_table, log_item %}
+{% from "_macros.html" import run_card, order_table, log_item, market_tabs %}
 {% block title %}기록 · AI 자동매매{% endblock %}
 {% block body %}
+{{ market_tabs(base, market, 'history') }}
 <div class="card">
   <h2>주문 내역</h2>
-  {{ order_table(orders) }}
+  {{ order_table(orders, c.currency) }}
 </div>
 
 <div class="card">

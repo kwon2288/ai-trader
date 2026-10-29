@@ -22,7 +22,8 @@ PROVIDERS = {
     "openai": {"label": "ChatGPT", "env": "OPENAI_API_KEY", "default": "gpt-6.1-sol"},
 }
 
-SYSTEM = """당신은 한국 주식시장(KRX)의 신중한 소액 포트폴리오 매니저입니다.
+SYSTEM = """당신은 신중한 소액 주식 포트폴리오 매니저입니다.
+데이터의 market 이 KR 이면 한국(KRX), US 면 미국 주식이며, 모든 금액·가격은 currency 기준입니다.
 주어진 데이터만으로 판단하고, 데이터에 없는 사실(뉴스·실적 등)을 지어내지 마세요.
 
 원칙:
@@ -40,9 +41,9 @@ SYSTEM = """당신은 한국 주식시장(KRX)의 신중한 소액 포트폴리�
 - reason 은 한국어 한두 문장으로, 어떤 지표 때문인지 구체적으로 쓰세요."""
 
 DECISION_PROPS = {
-    "code": {"type": "string", "description": "6자리 종목코드 (후보 목록 안에서만)"},
+    "code": {"type": "string", "description": "종목코드 — 한국은 6자리, 미국은 티커 (후보 목록 안에서만)"},
     "action": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
-    "amount_krw": {"type": "integer", "description": "BUY 일 때 투입할 금액(원), 아니면 0"},
+    "amount_krw": {"type": "number", "description": "BUY 일 때 투입할 금액(currency 단위), 아니면 0"},
     "sell_ratio": {"type": "number", "description": "SELL 일 때 보유 수량 중 매도 비율 0~1, 아니면 0"},
     "confidence": {"type": "number", "description": "0~1"},
     "reason": {"type": "string"},
@@ -98,16 +99,16 @@ def normalize(raw: dict, provider: str) -> dict:
         if not isinstance(d, dict):
             continue
         action = str(d.get("action", "")).upper().strip()
-        code = re.sub(r"\D", "", str(d.get("code", "")))
+        code = re.sub(r"[^A-Z0-9.\-]", "", str(d.get("code", "")).strip().upper())
         if action not in {"BUY", "SELL", "HOLD"} or not code:
             continue
         try:
             conf = min(max(float(d.get("confidence") or 0), 0.0), 1.0)
-            amount = max(int(float(d.get("amount_krw") or 0)), 0)
+            amount = max(round(float(d.get("amount_krw") or 0), 2), 0)
             ratio = min(max(float(d.get("sell_ratio") or 0), 0.0), 1.0)
         except (TypeError, ValueError):
             continue
-        out.append({"code": code.zfill(6)[-6:], "action": action, "amount_krw": amount,
+        out.append({"code": code.zfill(6) if code.isdigit() else code, "action": action, "amount_krw": amount,
                     "sell_ratio": ratio, "confidence": conf, "reason": str(d.get("reason", "")).strip()})
     return {"market_view": str(raw.get("market_view", "")).strip(), "decisions": out,
             "_provider": provider, "_usage": raw.get("_usage")}

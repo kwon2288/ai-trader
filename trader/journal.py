@@ -33,11 +33,14 @@ class Journal:
         self.db = sqlite3.connect(path, timeout=15)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
-        try:  # 예전 DB 호환: 어떤 AI가 판단했는지 기록하는 칸 추가
-            self.db.execute("ALTER TABLE runs ADD COLUMN ai TEXT")
-            self.db.commit()
-        except sqlite3.OperationalError:
-            pass
+        # 예전 DB 호환: 나중에 추가된 칸
+        for sql in ("ALTER TABLE runs ADD COLUMN ai TEXT",                       # 어떤 AI가 판단했는지
+                    "ALTER TABLE bot_positions ADD COLUMN market TEXT DEFAULT 'kr'"):  # 국내/미국
+            try:
+                self.db.execute(sql)
+                self.db.commit()
+            except sqlite3.OperationalError:
+                pass
 
     # 상태
     def get(self, key: str, default: str | None = None) -> str | None:
@@ -78,19 +81,21 @@ class Journal:
                               (mode, today + "%")).fetchone()
         return row["c"]
 
-    def recent_decisions(self, limit: int = 12) -> list[dict]:
+    def recent_decisions(self, limit: int = 12, mode: str | None = None) -> list[dict]:
         rows = self.db.execute(
             "SELECT r.ts, d.code, d.action, d.confidence, d.reason, d.outcome FROM decisions d "
-            "JOIN runs r ON r.id=d.run_id ORDER BY r.id DESC LIMIT ?", (limit,)).fetchall()
+            "JOIN runs r ON r.id=d.run_id WHERE (? IS NULL OR r.mode=?) ORDER BY r.id DESC LIMIT ?",
+            (mode, mode, limit)).fetchall()
         return [dict(r) for r in rows]
 
     # 봇 보유 종목
-    def bot_codes(self) -> dict[str, str]:
-        return {r["code"]: r["opened"] for r in self.db.execute("SELECT * FROM bot_positions")}
+    def bot_codes(self, market: str = "kr") -> dict[str, str]:
+        return {r["code"]: r["opened"] for r in self.db.execute(
+            "SELECT * FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))}
 
-    def open_position(self, code: str, name: str) -> None:
-        self.db.execute("INSERT OR IGNORE INTO bot_positions VALUES(?,?,?)",
-                        (code, name, now().date().isoformat()))
+    def open_position(self, code: str, name: str, market: str = "kr") -> None:
+        self.db.execute("INSERT OR IGNORE INTO bot_positions(code,name,opened,market) VALUES(?,?,?,?)",
+                        (code, name, now().date().isoformat(), market))
         self.db.commit()
 
     def close_position(self, code: str) -> None:
@@ -98,7 +103,8 @@ class Journal:
         self.db.commit()
 
     def held_days(self, code: str) -> int:
-        opened = self.bot_codes().get(code)
+        row = self.db.execute("SELECT opened FROM bot_positions WHERE code=?", (code,)).fetchone()
+        opened = row["opened"] if row else None
         return (now().date() - date.fromisoformat(opened)).days if opened else 999
 
     # 웹 화면용

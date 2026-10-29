@@ -1,4 +1,14 @@
 {% macro won(v) %}{{ "{:,}".format(v|int) }}원{% endmacro %}
+{% macro money(v, cur='KRW') %}{% if cur == 'USD' %}${{ "{:,.2f}".format(v|float) }}{% else %}{{ "{:,}".format(v|int) }}원{% endif %}{% endmacro %}
+{% macro num(v, cur='KRW') %}{% if cur == 'USD' %}{{ "{:,.2f}".format(v|float) }}{% else %}{{ "{:,}".format(v|int) }}{% endif %}{% endmacro %}
+{% macro market_tabs(base, market, endpoint) %}
+{% if base.us_enabled %}
+<div class="tabs">
+  <a href="{{ url_for(endpoint, m='kr') }}" class="{{ 'on' if market == 'kr' }}">🇰🇷 국내</a>
+  <a href="{{ url_for(endpoint, m='us') }}" class="{{ 'on' if market == 'us' }}">🇺🇸 미국</a>
+</div>
+{% endif %}
+{% endmacro %}
 {% macro pct(v) %}<span class="{{ 'up' if v > 0 else ('down' if v < 0 else '') }}">{{ "%+.2f"|format(v) }}%</span>{% endmacro %}
 
 {% macro run_card(r) %}
@@ -13,7 +23,7 @@
 {% else %}<div class="mute">판단 없음</div>{% endfor %}
 {% endmacro %}
 
-{% macro order_table(orders) %}
+{% macro order_table(orders, cur='KRW') %}
 <div class="scroll"><table>
 <tr><th>시각</th><th>구분</th><th>종목</th><th class="r">수량</th><th class="r">금액</th><th>사유</th></tr>
 {% for o in orders %}
@@ -21,7 +31,7 @@
   <td class="nw">{{ o.ts[5:10] }}<div class="mute">{{ o.ts[11:16] }}</div></td>
   <td class="nw act-{{ o.side }}">{{ '매수' if o.side=='BUY' else '매도' }}{% if not o.ok %} <span class="badge b-err">실패</span>{% endif %}</td>
   <td>{{ o.name }}<div class="mute">{{ o.code }}</div></td>
-  <td class="r">{{ o.qty }}</td><td class="r">{{ "{:,}".format(o.qty * o.est_price) }}</td>
+  <td class="r">{{ o.qty }}</td><td class="r">{{ num(o.qty * o.est_price, cur) }}</td>
   <td>{{ o.trigger }}{% if not o.ok %}<div class="mute">{{ o.message }}</div>{% endif %}</td>
 </tr>
 {% else %}<tr><td colspan="6" class="mute">주문 내역이 없습니다.</td></tr>{% endfor %}
@@ -30,7 +40,7 @@
 
 {% macro log_item(l) %}
 <details>
-  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ {'trade':'매매','analyze':'분석','scan':'종목검색'}.get(l.kind, l.kind) }}
+  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ '🇺🇸 ' if l.mode and l.mode.endswith('_us') }}{{ {'trade':'매매','analyze':'분석','scan':'종목검색'}.get(l.kind, l.kind) }}
     · {{ {'timer':'자동','web':'웹','cli':'명령줄'}.get(l.source, l.source) }}</summary>
   <pre>{{ l.output }}</pre>
 </details>

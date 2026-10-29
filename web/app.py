@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from functools import wraps
 from pathlib import Path
 
@@ -68,7 +69,7 @@ def _busy(c) -> bool:
         return True
 
 
-def _start_job(kind: str) -> str | None:
+def _start_job(kind: str, market: str = "kr") -> str | None:
     c = cfg()
     with _job_lock:
         if _busy(c):
@@ -80,7 +81,7 @@ def _start_job(kind: str) -> str | None:
             if kind == "scan":
                 run_scan(cfg(), source="web")
             else:
-                run_cycle(cfg(), analyze_only=(kind == "analyze"), force=False, source="web")
+                run_cycle(cfg(), analyze_only=(kind == "analyze"), force=False, source="web", market=market)
         except Busy:
             pass
         finally:
@@ -122,6 +123,36 @@ def logout():
 
 
 # ── 화면 ───────────────────────────────────────────────
+US_SCHEDULE = [(10, 30), (15, 0)]  # deploy/ai-trader-us.timer 와 동일 (뉴욕 시간)
+ET = ZoneInfo("America/New_York")
+
+
+def next_run_us(now: datetime) -> datetime:
+    n = now.astimezone(ET)
+    for d in range(8):
+        day = n.date() + timedelta(days=d)
+        if day.weekday() >= 5:
+            continue
+        for h, m in US_SCHEDULE:
+            t = datetime(day.year, day.month, day.day, h, m, tzinfo=ET)
+            if t > n:
+                return t.astimezone(KST)
+    return now
+
+
+def fmt_kst(t: datetime) -> str:
+    return t.strftime('%m/%d') + '(' + '월화수목금토일'[t.weekday()] + ') ' + t.strftime('%H:%M')
+
+
+def current_market() -> str:
+    """?m=kr|us 로 바꾸고 세션에 기억. 미국이 꺼져 있으면 항상 국내."""
+    m = request.args.get("m") or request.form.get("market") or session.get("market") or "kr"
+    if m not in ("kr", "us") or (m == "us" and not cfg().us_enabled):
+        m = "kr"
+    session["market"] = m
+    return m
+
+
 def next_run(now: datetime) -> datetime:
     for d in range(8):
         day = now.date() + timedelta(days=d)
@@ -157,30 +188,35 @@ def equity_svg(series: list[dict], base: int) -> str:
 @app.get("/")
 @login_required
 def index():
-    c = cfg()
+    m = current_market()
+    base = cfg()
+    c = base.for_market(m)
     j = Journal(c.db_path)
-    snap = j.snapshot(c.mode)
+    snap = j.snapshot(c.ledger)
     stopped = c.stop_file.exists()
-    halted = j.get(f"halted_{c.mode}") == "1"
+    halted = j.get(f"halted_{c.ledger}") == "1"
     now = datetime.now(KST)
+    from trader.runner import broker_name
     return render_template(
-        "index.html", c=c, snap=snap, stopped=stopped, halted=halted,
-        busy=_busy(c), job=_job,
-        next_run=(lambda t: t.strftime('%m/%d') + '(' + '월화수목금토일'[t.weekday()] + ') ' + t.strftime('%H:%M'))(next_run(now)),
-        chart=equity_svg(j.equity_series(c.mode), c.total_krw),
-        runs=j.runs_with_decisions(c.mode, 5), orders=j.orders(c.mode, 10),
-        logs=j.logs(5), orders_today=j.orders_today(c.mode),
-        auto=universe.saved(j), today=now.strftime("%Y-%m-%d"),
+        "index.html", c=c, base=base, market=m, broker=broker_name(c),
+        snap=snap, stopped=stopped, halted=halted, busy=_busy(c), job=_job,
+        next_run=fmt_kst(next_run(now) if m == "kr" else next_run_us(now)),
+        chart=equity_svg(j.equity_series(c.ledger), c.total_krw),
+        runs=j.runs_with_decisions(c.ledger, 5), orders=j.orders(c.ledger, 10),
+        logs=j.logs(5), orders_today=j.orders_today(c.ledger),
+        auto=universe.saved(j) if m == "kr" else None, today=now.strftime("%Y-%m-%d"),
     )
 
 
 @app.get("/history")
 @login_required
 def history():
-    c = cfg()
+    m = current_market()
+    base = cfg()
+    c = base.for_market(m)
     j = Journal(c.db_path)
-    return render_template("history.html", c=c, runs=j.runs_with_decisions(c.mode, 30),
-                           orders=j.orders(c.mode, 200), logs=j.logs(50))
+    return render_template("history.html", c=c, base=base, market=m, runs=j.runs_with_decisions(c.ledger, 30),
+                           orders=j.orders(c.ledger, 200), logs=j.logs(50))
 
 
 @app.route("/settings", methods=["GET", "POST"])
@@ -198,8 +234,14 @@ def settings():
     fields = [(key, label, raw.get(sec, {}).get(key, "")) for sec, key, _t, _lo, _hi, label in settings_io.FIELDS]
     auto_fields = [(key, label, raw.get(sec, {}).get(key, settings_io.DEFAULTS.get(key, "")))
                    for sec, key, _t, _lo, _hi, label in settings_io.AUTO_FIELDS]
+    us_fields = [(key, label, raw.get("us", {}).get(key, settings_io.US_DEFAULTS.get(key, "")))
+                 for _sec, key, _t, _lo, _hi, label in settings_io.US_FIELDS]
+    us_raw = {"enabled": False, "margin_currency": "krw", "symbols": [], **raw.get("us", {})}
+    from trader.runner import broker_name
+    us_broker = broker_name(cfg().for_market("us"))
     from trader.analyst import PROVIDERS, available
     return render_template("settings.html", c=cfg(), fields=fields, raw=raw, auto_fields=auto_fields,
+                           us_fields=us_fields, us=us_raw, us_broker=us_broker,
                            order_types=settings_io.ORDER_TYPES, providers=settings_io.PROVIDER_CHOICES,
                            model_fields=settings_io.MODEL_FIELDS,
                            keys={p: available(p) for p in PROVIDERS},
@@ -210,23 +252,26 @@ def settings():
 @app.post("/action/<name>")
 @login_required
 def action(name):
+    m = current_market()
     c = cfg()
     if name == "stop":
         c.stop_file.write_text(datetime.now(KST).isoformat())
         flash("⏸ 정지했습니다. 다음 실행부터 매매하지 않습니다.", "ok")
     elif name == "resume":
         c.stop_file.unlink(missing_ok=True)
-        Journal(c.db_path).set(f"halted_{c.mode}", "0")
+        j = Journal(c.db_path)
+        for mk in ("kr", "us"):
+            j.set(f"halted_{c.for_market(mk).ledger}", "0")
         flash("▶ 재개했습니다.", "ok")
     elif name in ("analyze", "trade", "scan"):
-        err = _start_job(name)
+        err = _start_job(name, "kr" if name == "scan" else m)
         msg = {"analyze": "🧠 AI 분석을 시작했습니다 (주문 없음).",
                "trade": "🚀 매매 사이클을 시작했습니다.",
                "scan": "🔎 자동 종목 검색을 시작했습니다 (1분 정도)."}[name]
         flash(err or msg, "err" if err else "ok")
     elif name == "refresh":
         try:
-            refresh_balance(c)
+            refresh_balance(c, m)
             flash("잔고를 새로 불러왔습니다.", "ok")
         except Exception as e:  # noqa: BLE001
             flash(f"잔고 조회 실패: {e}", "err")

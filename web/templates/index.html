@@ -1,12 +1,15 @@
 {% extends "base.html" %}
-{% from "_macros.html" import won, pct, run_card, order_table, log_item %}
+{% from "_macros.html" import money, num, pct, run_card, order_table, log_item, market_tabs %}
 {% block body %}
+{{ market_tabs(base, market, 'index') }}
 
 <div class="card">
   <div class="row">
     {% if c.mode == 'live' %}<span class="badge b-err">🔴 실계좌</span>
     {% elif c.mode == 'mock' %}<span class="badge b-ok">모의투자</span>
     {% else %}<span class="badge">드라이런 (주문 안 냄)</span>{% endif %}
+    <span class="badge">🏦 {{ {'nh':'NH 나무','kis':'한국투자','toss':'토스'}.get(broker, broker) }}</span>
+    {% if broker == 'toss' and c.mode == 'mock' %}<span class="badge b-err">⚠ 토스는 모의투자 없음 → .env 를 dry 로</span>{% endif %}
     <span class="badge">🧠 {{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT','consensus':'다수결','rules':'규칙만'}.get(c.ai_provider, c.ai_provider) }}{% if c.ai_hybrid and c.ai_provider != 'rules' %} + 규칙필터{% endif %}</span>
 
     {% if busy %}<span class="badge b-warn" id="busy">⏳ 실행 중…</span>
@@ -15,7 +18,7 @@
     {% else %}<span class="badge b-ok">● 자동 실행 대기</span>{% endif %}
   </div>
   <div class="mute" style="margin-top:6px">
-    다음 자동 실행 {{ next_run }}
+    다음 자동 실행 {{ next_run }}{% if market == 'us' %} (한국시간 · 뉴욕 10:30/15:00){% endif %}
     {% if stopped or halted %} — 정지 상태라 건너뜁니다{% endif %}
   </div>
 </div>
@@ -24,13 +27,13 @@
   <h2>봇 자산</h2>
   {% if snap %}
   <div class="stats">
-    <div class="stat"><div class="k">총 자산</div><div class="v">{{ won(snap.equity) }}</div></div>
+    <div class="stat"><div class="k">총 자산</div><div class="v">{{ money(snap.equity, c.currency) }}</div></div>
     <div class="stat"><div class="k">원금 대비</div><div class="v">{{ pct(snap.pnl_pct) }}</div></div>
-    <div class="stat"><div class="k">현금</div><div class="v">{{ won(snap.cash) }}</div></div>
+    <div class="stat"><div class="k">현금</div><div class="v">{{ money(snap.cash, c.currency) }}</div></div>
     <div class="stat"><div class="k">오늘 주문</div><div class="v">{{ orders_today }} / {{ c.max_orders_per_day }}</div></div>
   </div>
   {{ chart|safe }}
-  <div class="mute">원금 {{ won(c.total_krw) }} · 기준 {{ snap.ts[5:16].replace('T',' ') }}</div>
+  <div class="mute">원금 {{ money(c.total_krw, c.currency) }} · 기준 {{ snap.ts[5:16].replace('T',' ') }}</div>
   {% else %}
   <div class="mute">아직 실행 기록이 없습니다. 아래 ‘AI 분석’이나 ‘잔고 새로고침’을 눌러 보세요.</div>
   {% endif %}
@@ -43,7 +46,7 @@
     <tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">수익률</th></tr>
     {% for p in snap.positions %}
     <tr><td>{{ p.name }}<div class="mute">{{ p.code }}</div></td><td class="r">{{ p.qty }}</td>
-      <td class="r">{{ "{:,}".format(p.avg_price) }}</td><td class="r">{{ "{:,}".format(p.now_price) }}</td>
+      <td class="r">{{ num(p.avg_price, c.currency) }}</td><td class="r">{{ num(p.now_price, c.currency) }}</td>
       <td class="r">{{ pct(p.pnl_pct) }}</td></tr>
     {% endfor %}
   </table></div>
@@ -70,11 +73,15 @@
       <button class="btn danger">⏸ 정지</button></form>
     {% endif %}
   </div>
-  <div class="mute" style="margin-top:8px">‘매매 실행’은 정규장 시간에만 주문합니다. 실행에는 20초~1분 정도 걸려요.</div>
+  <div class="mute" style="margin-top:8px">‘매매 실행’은 정규장 시간에만 주문합니다{% if market == 'us' %} (미국 정규장: 한국시간 23:30~06:00, 서머타임 22:30~05:00){% endif %}.
+    실행에는 20초~1분 정도 걸려요.{% if broker == 'toss' and c.mode == 'live' %} <b>토스는 모의투자가 없어 실제 주문이 나갑니다.</b>{% endif %}</div>
 </div>
 
 <div class="card">
   <h2>분석 대상 종목</h2>
+  {% if market == 'us' %}
+  <div class="mute">미국 {{ c.symbols|length }}종목 (직접 지정): {{ c.symbols|join(', ') }}</div>
+  {% else %}
   <div class="mute">핵심 {{ c.symbols|length }}종목 (직접 지정) + 자동 선정
     {% if c.auto_count > 0 %}{{ c.auto_count }}종목{% else %}꺼짐{% endif %}</div>
   {% if c.auto_count > 0 %}
@@ -98,6 +105,7 @@
     <form class="inline" method="post" action="{{ url_for('action', name='scan') }}">
       <button class="btn" style="margin-top:8px" {{ 'disabled' if busy }}>🔎 종목 다시 찾기</button></form>
   {% endif %}
+  {% endif %}
   <div style="margin-top:6px"><a href="{{ url_for('settings') }}">조건 바꾸기 →</a></div>
 </div>
 
@@ -108,7 +116,7 @@
 
 <div class="card">
   <h2>최근 주문</h2>
-  {{ order_table(orders) }}
+  {{ order_table(orders, c.currency) }}
 </div>
 
 <div class="card">

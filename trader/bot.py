@@ -24,16 +24,17 @@ class Bot:
 
     # ── 봇 전용 현금 장부 ───────────────────────────────
     @property
-    def bot_cash(self) -> int:
-        key = f"bot_cash_{self.cfg.mode}"
+    def bot_cash(self):
+        key = f"bot_cash_{self.cfg.ledger}"
         v = self.j.get(key)
         if v is None:
             self.j.set(key, str(self.cfg.total_krw))
-            return self.cfg.total_krw
-        return int(float(v))
+            v = self.cfg.total_krw
+        return round(float(v), 2) if self.cfg.currency == "USD" else int(float(v))
 
-    def _add_cash(self, delta: int) -> None:
-        self.j.set(f"bot_cash_{self.cfg.mode}", str(self.bot_cash + delta))
+    def _add_cash(self, delta) -> None:
+        new = self.bot_cash + delta
+        self.j.set(f"bot_cash_{self.cfg.ledger}", str(round(new, 2) if self.cfg.currency == "USD" else int(new)))
 
     # ── 주문 실행 (공통) ────────────────────────────────
     def _exec(self, side: str, code: str, name: str, qty: int, est_price: int, trigger: str) -> bool:
@@ -45,37 +46,38 @@ class Bot:
             price = est_price
         fn = self.broker.buy if side == "BUY" else self.broker.sell
         res = fn(code, qty, price)
-        self.j.add_order(self.cfg.mode, side, code, name, qty, est_price, res, trigger)
+        self.j.add_order(self.cfg.ledger, side, code, name, qty, est_price, res, trigger)
         if not res.ok:
             self.say(f"❌ {name} {side} {qty}주 실패: {res.message}")
             return False
         self.orders_left -= 1
-        amt = qty * est_price
-        self.say(f"✅ {'매수' if side == 'BUY' else '매도'} {name}({code}) {qty}주 ≈{amt:,}원 [{trigger}] "
+        amt = round(qty * est_price, 2)
+        self.say(f"✅ {'매수' if side == 'BUY' else '매도'} {name}({code}) {qty}주 ≈{self.cfg.money(amt)} [{trigger}] "
                  f"주문번호 {res.order_no}")
         if self.cfg.mode != "dry":
             self._add_cash(-amt if side == "BUY" else amt)
             if side == "BUY":
-                self.j.open_position(code, name)
+                self.j.open_position(code, name, self.cfg.market)
         return True
 
     # ── 메인 ────────────────────────────────────────────
     def run(self, force: bool = False, analyze_only: bool = False) -> str:
         cfg = self.cfg
         mode_label = {"dry": "드라이런(주문 안 냄)", "mock": "모의투자", "live": "🔴 실계좌"}[cfg.mode]
-        self.say(f"[{now():%Y-%m-%d %H:%M}] 실행 모드: {mode_label}")
+        market_label = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(cfg.market, cfg.market)
+        self.say(f"[{now():%Y-%m-%d %H:%M}] {market_label} · 실행 모드: {mode_label}")
 
         if cfg.stop_file.exists():
             self.say(f"⏸ 킬스위치 파일({cfg.stop_file.name})이 있어 중단합니다.")
             return self._out()
-        if self.j.get(f"halted_{cfg.mode}") == "1":
+        if self.j.get(f"halted_{cfg.ledger}") == "1":
             self.say("⏸ 최대 손실 한도 도달로 정지된 상태입니다. 확인 후 `python run.py resume` 으로 해제하세요.")
             return self._out()
 
         # 1) 데이터 수집
         candidates, quotes = [], {}
         bal = self.broker.balance()
-        bot_codes = self.j.bot_codes()
+        bot_codes = self.j.bot_codes(cfg.market)
         if cfg.mode != "dry":  # 사용자가 직접 판 종목은 장부에서 정리
             for code in list(bot_codes):
                 if code not in bal.holdings:
@@ -111,7 +113,8 @@ class Bot:
 
         market_open = any(q.market_status == "1" for q in quotes.values())
         if not market_open and not (force or analyze_only):
-            self.say("💤 지금은 정규장이 아닙니다 (휴장일/장외 시간). 종료합니다.")
+            self.say("💤 지금은 정규장이 아닙니다 (휴장일/장외 시간). 종료합니다."
+                     + (" 미국 정규장은 한국시간 23:30~06:00 (서머타임 22:30~05:00)" if cfg.market == "us" else ""))
             return self._out()
 
         # 자동 선정 종목 (그날 첫 실행 때 검색, 실패하면 직전 목록)
@@ -124,22 +127,23 @@ class Bot:
         for c, h in held.items():
             if c in quotes:
                 h.now_price = quotes[c].price
-        holdings_value = sum(h.value for h in held.values())
-        equity = self.bot_cash + holdings_value
+        holdings_value = round(sum(h.value for h in held.values()), 2)
+        equity = round(self.bot_cash + holdings_value, 2)
         dd = (equity / cfg.total_krw - 1) * 100
-        self.say(f"💰 봇 자산 {equity:,}원 (현금 {self.bot_cash:,} + 주식 {holdings_value:,}) | 원금 대비 {dd:+.2f}%")
-        run_id = self.j.start_run(cfg.mode, equity)
-        self.j.save_snapshot(cfg.mode, {
+        self.say(f"💰 봇 자산 {cfg.money(equity)} (현금 {cfg.money(self.bot_cash)} + 주식 {cfg.money(holdings_value)})"
+                 f" | 원금 대비 {dd:+.2f}%")
+        run_id = self.j.start_run(cfg.ledger, equity)
+        self.j.save_snapshot(cfg.ledger, {
             "equity": equity, "cash": self.bot_cash, "pnl_pct": round(dd, 2),
             "positions": [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
                            "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()],
         })
         if dd <= cfg.max_drawdown_pct:
-            self.j.set(f"halted_{cfg.mode}", "1")
+            self.j.set(f"halted_{cfg.ledger}", "1")
             self.say(f"🛑 원금 대비 {dd:.1f}% — 최대 손실 한도({cfg.max_drawdown_pct}%) 도달. 신규 매매를 멈춥니다.")
             return self._out()
 
-        self.orders_left = 0 if analyze_only else cfg.max_orders_per_day - self.j.orders_today(cfg.mode)
+        self.orders_left = 0 if analyze_only else cfg.max_orders_per_day - self.j.orders_today(cfg.ledger)
 
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
         for c, h in list(held.items()):
@@ -184,17 +188,19 @@ class Bot:
         # 5) AI 판단
         ctx = {
             "today": now().strftime("%Y-%m-%d %A"),
+            "market": cfg.market.upper(),          # KR | US
+            "currency": cfg.currency,              # 모든 금액·가격의 통화
             "rules": {
-                "bot_budget_krw": cfg.total_krw,
-                "max_per_position_krw": cfg.max_per_position_krw,
+                "bot_budget": cfg.total_krw,
+                "max_per_position": cfg.max_per_position_krw,
                 "max_positions": cfg.max_positions,
                 "auto_stop_loss_pct": cfg.stop_loss_pct,
                 "auto_take_profit_pct": cfg.take_profit_pct,
                 "min_hold_days": cfg.min_hold_days,
             },
             "portfolio": {
-                "cash_krw": min(self.bot_cash, bal.orderable_cash),
-                "equity_krw": equity,
+                "cash": min(self.bot_cash, bal.orderable_cash),
+                "equity": equity,
                 "positions": [{
                     "code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
                     "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2),
@@ -202,7 +208,7 @@ class Bot:
                 } for c, h in held.items()],
             },
             "candidates": candidates,
-            "recent_decisions": self.j.recent_decisions(),
+            "recent_decisions": self.j.recent_decisions(mode=cfg.ledger),
         }
         try:
             result = self.analyst.decide(ctx)
@@ -221,8 +227,9 @@ class Bot:
             self.say(f"  · {d.get('action')} {nm} (확신 {float(d.get('confidence', 0)):.2f}) → {outcome}\n"
                      f"    └ {d.get('reason', '')}")
 
+        from .config import norm_symbol
         for d in decisions:
-            d["code"] = str(d.get("code", "")).zfill(6)
+            d["code"] = norm_symbol(d.get("code", ""), cfg.market)
             d["confidence"] = float(d.get("confidence") or 0)
         if allowed is not None:            # 하이브리드: 신호 난 종목만 매매 대상
             for d in [d for d in decisions if d["code"] not in allowed and d.get("action") != "HOLD"]:
@@ -267,12 +274,12 @@ class Bot:
             if len(held) >= cfg.max_positions:
                 note(d, f"보류 (최대 보유 {cfg.max_positions}종목)"); continue
             est = q.ask or q.price
-            budget = min(int(d.get("amount_krw") or cfg.max_per_position_krw), cfg.max_per_position_krw, cash)
-            qty = budget // est if est else 0
+            budget = min(float(d.get("amount_krw") or cfg.max_per_position_krw), cfg.max_per_position_krw, cash)
+            qty = int(budget // est) if est else 0
             if qty < 1:
-                note(d, f"보류 (예산 {budget:,}원으로 1주({est:,}원)도 못 삼)"); continue
+                note(d, f"보류 (예산 {cfg.money(budget)}으로 1주({cfg.money(est)})도 못 삼)"); continue
             if analyze_only:
-                note(d, f"분석 전용 — {qty}주 ≈{qty * est:,}원 매수 예정"); continue
+                note(d, f"분석 전용 — {qty}주 ≈{cfg.money(qty * est)} 매수 예정"); continue
             if cfg.mode != "dry":
                 qty = min(qty, self.broker.buyable_qty(c, est))
                 if qty < 1:

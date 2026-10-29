@@ -92,7 +92,7 @@ class RulesAnalyst:
                                   "confidence": s["strength"], "reason": f"[규칙] {s['reason']}"})
             else:
                 decisions.append({"code": code, "action": "BUY", "sell_ratio": 0,
-                                  "amount_krw": rules.get("max_per_position_krw", 0),
+                                  "amount_krw": rules.get("max_per_position", 0),
                                   "confidence": s["strength"], "reason": f"[규칙] {s['reason']}"})
         buys = sum(d["action"] == "BUY" for d in decisions)
         sells = len(decisions) - buys

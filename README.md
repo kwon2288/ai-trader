@@ -2,7 +2,8 @@
 
 **AI가 하루 1~2번 국내 주식을 분석해서, 정해 둔 규칙 안에서만 사고파는 소액 자동매매 프로그램**
 
-- 증권사: **NH투자증권 나무 Open API** (기본) · 한국투자증권 KIS Open API
+- 시장: **국내(KRX)** + **미국** — 예산·장부·손실한도를 시장별로 따로
+- 증권사: **NH투자증권 나무** (기본, 국내·미국) · **토스증권** (국내·미국) · 한국투자증권 (국내)
 - AI: **Claude · Gemini · ChatGPT** 중 선택, 여러 AI **다수결**, 또는 **규칙만**(AI 없음)
 - **하이브리드:** 규칙이 먼저 신호를 찾고 신호 난 종목만 AI가 확인 → 신호 없는 날은 AI 호출 0회
 - 운영: 리눅스(Proxmox LXC 등) + systemd 타이머, **웹 관리 화면**(PC·휴대폰)
@@ -56,6 +57,7 @@ AI가 이상한 값을 내거나 응답에 실패하면 그 회차는 매매하�
 | 자동 재시도 | AI 서버 혼잡(503)·한도(429) 시 10·30·60초 간격으로 재시도 |
 | 웹 관리 화면 | 현황·자산 추이·AI 판단 근거·주문 내역·설정 변경·정지/재개·수동 실행 |
 | 자동 종목 선정 | 핵심 종목(직접 지정)은 고정, 나머지 자리는 매일 전 종목 조건 검색 → 전일 거래대금 상위로 채움 |
+| 미국 주식 | 달러 예산·장부 따로, 뉴욕 시간 기준 자동 실행, NH는 원화로 바로 주문(환전 불필요) |
 | 휴장일 처리 | 증권사 장상태 값, 없으면 오늘 일봉 유무로 판단해 자동으로 건너뜀 |
 
 ## 안전장치
@@ -171,6 +173,7 @@ sudo systemctl enable --now ai-trader-web
 | 명령 | 설명 |
 |---|---|
 | `run.py check` | 증권사 연결·계좌·잔고·시세·AI 키 상태 확인 |
+| `... --market us` | 모든 명령에 붙이면 미국 주식 대상 (예: `run.py trade --market us`) |
 | `run.py accounts` | (NH) 계좌 목록과 국내주식 사용 가능 여부 |
 | `run.py scan` | 자동 선정 종목 지금 다시 찾기 (평소엔 그날 첫 실행 때 자동) |
 | `run.py aitest` | 키가 있는 AI마다 짧은 테스트 질의 (시세·주문 없음) |
@@ -245,12 +248,14 @@ sudo systemctl enable --now ai-trader-web
 | 변수 | 설명 |
 |---|---|
 | `TRADING_MODE` | `dry` / `mock` / `live` |
-| `BROKER` | `nh`(기본) / `kis` |
+| `BROKER` | 국내 증권사: `nh`(기본) / `kis` / `toss` |
+| `BROKER_US` | 미국 증권사: `nh` / `toss` (비우면 국내와 같게, 국내가 kis면 nh) |
 | `NHPLUG_APP_KEY`, `NHPLUG_APP_SECRET` | NH 나무 앱키 |
 | `NHPLUG_BASE_URL` | 모의 `https://moapi.nhplug.com:8443` / 실전 `https://api.nhplug.com:8443` |
 | `NHPLUG_ACCOUNT` | 계좌가 여러 개일 때 국내주식 계좌번호 |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | AI 키 (쓸 것만) |
 | `I_UNDERSTAND_REAL_MONEY` | 실계좌 실행 시 `yes` |
+| `TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET` | 토스증권 (모의투자 없음) |
 | `WEB_PASSWORD`, `WEB_PORT` | 웹 관리 화면 |
 
 전체 목록은 [`.env.example`](.env.example)을 보세요.
@@ -277,6 +282,45 @@ bash deploy/update.sh      # git pull → 패키지 설치 → 웹 화면 재시
 `.env`, `config.toml`, `data/`는 git에 없으므로 업데이트해도 그대로 유지됩니다.
 자동 실행(타이머)은 매번 새로 시작하므로 따로 재시작할 필요가 없습니다.
 
+## 미국 주식
+
+<p align="center"><img src="docs/screenshot-us.png" width="300" alt="미국 탭"></p>
+
+웹 **설정 → 🇺🇸 미국 주식**에서 켜거나 `config.toml`의 `[us] enabled = true`.
+
+| 항목 | 내용 |
+|---|---|
+| 예산 | `total_usd`, `max_per_position_usd` (달러). 국내 예산과 완전히 별도 장부 |
+| 공유 설정 | 손절·익절·최대 손실·최소 확신도·최소 보유일·AI 선택·하이브리드는 국내와 같은 값 사용 |
+| 종목 | `[us] symbols` 티커 목록 (미국은 자동 선정 없음). 종목당 한도보다 비싼 종목은 매수 제외 — 소수점 매수 안 함 |
+| 주문 | 기본 지정가(호가 기준). NH는 `margin_currency = "krw"`면 **원화로 바로 주문**(환전 불필요) |
+| 실행 시각 | 뉴욕 평일 10:30·15:00 (한국시간 밤, 서머타임 자동 반영) |
+
+```bash
+.venv/bin/python run.py check --market us        # 미국 연결 확인
+.venv/bin/python run.py analyze --market us      # AI 판단만 보기
+sudo cp deploy/ai-trader-us.service deploy/ai-trader-us.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now ai-trader-us.timer
+```
+
+웹 현황·기록 화면 위쪽의 **🇰🇷 국내 / 🇺🇸 미국** 탭으로 전환합니다. 금액은 미국 탭에서 달러로 표시돼요.
+
+## 토스증권
+
+`.env`에서 `BROKER=toss`(국내) 또는 `BROKER_US=toss`(미국)로 지정합니다. 국내는 NH, 미국은 토스처럼 섞어 써도 됩니다.
+
+1. 토스증권 **PC웹** 로그인 → 설정 → **Open API**에서 `client_id`·`client_secret` 발급
+2. 같은 화면에서 **이 서버의 공인 IP를 허용 IP로 등록** — 등록 안 된 IP는 403으로 막힙니다.
+   집 인터넷 공인 IP가 바뀌거나 백업 회선으로 넘어가면 다시 등록해야 해요.
+3. `.env`에 `TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET` 입력 → `run.py accounts`, `run.py check` 로 확인
+
+> ⚠️ **토스증권은 모의투자 환경이 없습니다.** `TRADING_MODE`는 `dry`(주문 없음) 또는 `live`만 쓸 수 있고, `mock`이면 실행을 거부합니다.
+> NH 모의투자로 충분히 검증한 뒤 토스 실계좌로 옮기는 순서를 권장합니다.
+
+- 토큰은 클라이언트당 1개만 유효해서(재발급 시 이전 토큰 무효), 타이머·웹이 같은 토큰 파일을 잠금으로 공유합니다.
+- 호출 제한(계좌 초당 1회 등)에 맞춰 자동으로 간격을 둡니다.
+- 토스는 PER·52주 고가 같은 상세 시세를 주지 않아 AI에 넘기는 정보가 NH보다 조금 적습니다(가격·일봉 지표는 동일).
+
 ## 실계좌로 전환
 
 `.env`에서 세 줄을 바꿉니다.
@@ -297,6 +341,8 @@ ai-trader/
 ├── config.example.toml    # 전략 설정 예시 → 첫 실행 시 config.toml 로 복사 (git 제외)
 ├── .env.example           # 자격증명·모드 템플릿
 ├── trader/
+│   ├── nh_us.py           # NH 미국 주식
+│   ├── toss.py            # 토스증권 (국내·미국)
 │   ├── signals.py         # 규칙 신호 (하이브리드 1차 필터 · 규칙만 모드)
 │   ├── universe.py        # 자동 종목 선정 (종목마스터 1차 필터 → 전일 거래대금 순위)
 │   ├── bot.py             # 한 사이클: 데이터 → 손절/익절 → AI → 위험관리 → 주문
@@ -323,6 +369,7 @@ ai-trader/
 .venv/bin/python tests/test_signals.py   # 규칙 신호·하이브리드(신호 없으면 AI 생략)·규칙만 모드
 .venv/bin/python tests/test_universe.py  # 자동 종목 선정: 필터·순위·하루 1회 검색·실패 시 직전 목록
 .venv/bin/python tests/test_nh.py        # NH: 시세만 실전 서버, 주문·잔고는 모의 서버
+.venv/bin/python tests/test_markets.py   # 국내/미국 장부 분리 · NH 미국 · 토스증권
 .venv/bin/python tests/test_kis.py       # KIS: 파싱·tr_id·안전장치
 ```
 

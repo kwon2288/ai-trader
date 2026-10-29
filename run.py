@@ -63,6 +63,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="AI 자동매매")
     p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume"])
     p.add_argument("--force", action="store_true", help="장 상태 확인 무시 (테스트용)")
+    p.add_argument("--market", choices=["kr", "us"], default="kr", help="kr=국내(기본), us=미국")
     args = p.parse_args()
 
     cfg = config.load()
@@ -74,7 +75,9 @@ def main() -> None:
         return
     if args.cmd == "resume":
         cfg.stop_file.unlink(missing_ok=True)
-        Journal(cfg.db_path).set(f"halted_{cfg.mode}", "0")
+        j = Journal(cfg.db_path)
+        for m in ("kr", "us"):                       # 국내·미국 손실한도 정지 모두 해제
+            j.set(f"halted_{cfg.for_market(m).ledger}", "0")
         print("▶ 정지 해제했습니다.")
         return
     if args.cmd == "report":
@@ -82,8 +85,10 @@ def main() -> None:
         if not rows:
             print("주문 내역이 없습니다.")
         for r in rows:
+            usd = str(r["mode"]).endswith("_us")
+            amt = r["qty"] * r["est_price"]
             print(f"{r['ts'][:16]} [{r['mode']}] {'매수' if r['side'] == 'BUY' else '매도'} "
-                  f"{r['name']}({r['code']}) {r['qty']}주 ≈{r['qty'] * r['est_price']:,}원 "
+                  f"{r['name']}({r['code']}) {r['qty']}주 ≈{f'${amt:,.2f}' if usd else f'{amt:,.0f}원'} "
                   f"{'OK' if r['ok'] else 'FAIL'} [{r['trigger']}]")
         return
 
@@ -92,6 +97,13 @@ def main() -> None:
         return
 
     if args.cmd == "accounts":
+        if os.environ.get("BROKER", "nh").lower() == "toss":
+            from trader.toss import TossBroker
+            b = TossBroker("dry", "kr", cfg.data_dir, account_seq="-")
+            for a in b.list_accounts():
+                print(f"  계좌 {a['acct_no']}  유형 {a['acct_type']}  accountSeq {a['seq']}")
+            print("→ 여러 개면 .env 에 TOSS_ACCOUNT_SEQ=<accountSeq> 로 지정하세요.")
+            return
         from trader.broker import NHBroker
         b = NHBroker(cfg.mode, account="-")   # 자동 선택 건너뛰고 목록만
         print(f"서버: {b.env}")
@@ -101,19 +113,20 @@ def main() -> None:
         return
 
     from trader.broker import BrokerError
-    from trader.runner import Busy, make_broker, run_cycle
+    from trader.runner import Busy, broker_name, make_broker, market_cfg, run_cycle
 
     if args.cmd in ("analyze", "trade"):
         if args.cmd == "trade":
             guard_live(cfg)
         try:
             print(run_cycle(cfg, analyze_only=(args.cmd == "analyze"), force=args.force,
-                            source="timer" if os.environ.get("INVOCATION_ID") else "cli"))
+                            source="timer" if os.environ.get("INVOCATION_ID") else "cli", market=args.market))
         except Busy as e:
             sys.exit(str(e))
         return
 
     try:
+        cfg = market_cfg(cfg, args.market)
         broker = make_broker(cfg)
     except BrokerError as e:
         sys.exit(f"증권사 연결 설정 오류: {e}")
@@ -133,14 +146,19 @@ def main() -> None:
         return
 
     if args.cmd == "check":
-        print(f"모드: {cfg.mode} | 서버: {broker.env} | 계좌: {broker.account}")
+        print(f"시장: {cfg.market.upper()} | 증권사: {broker_name(cfg)} | 모드: {cfg.mode} | 서버: {broker.env}"
+              f" | 계좌: {broker.account}")
         bal = broker.balance()
-        print(f"주문가능금액: {bal.orderable_cash:,}원 | 보유 {len(bal.holdings)}종목")
+        oc = bal.orderable_cash
+        print(f"주문가능금액: {'(원화 증거금 — 주문 시 확인)' if oc == float('inf') else cfg.money(oc)}"
+              f" | 보유 {len(bal.holdings)}종목 | 봇 예산 {cfg.money(cfg.total_krw)}")
         for h in bal.holdings.values():
             print(f"  {h.name}({h.code}) {h.qty}주 평단 {h.avg_price:,} 현재 {h.now_price:,} ({h.pnl_pct:+.2f}%)")
         try:
+            if not cfg.symbols:
+                raise BrokerError("분석 대상 종목이 비어 있습니다")
             q = broker.quote(cfg.symbols[0])
-            print(f"시세 확인: {q.name} {q.price:,}원 ({q.change_pct:+.2f}%) 장상태={q.market_status or '장외'}")
+            print(f"시세 확인: {q.name} {cfg.money(q.price)} ({q.change_pct:+.2f}%) 장상태={q.market_status or '장외'}")
             bars = broker.daily(cfg.symbols[0], 5)
             print(f"일봉 확인: 최근 {len(bars)}일 (마지막 {bars[-1]['date'] if bars else '-'})")
         except Exception as e:  # noqa: BLE001

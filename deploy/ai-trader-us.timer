@@ -1,0 +1,10 @@
+[Unit]
+Description=AI 자동매매 미국 — 뉴욕 시간 평일 10:30, 15:00 (한국시간 밤, 서머타임 자동 반영)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 10:30:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 15:00:00 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target

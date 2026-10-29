@@ -100,7 +100,7 @@ class NHBroker:
 
     # 모의투자 서버는 시세 API 를 제공하지 않는다(IGW40023) → 시세만 실전 서버에서 조회.
     # 시세는 계좌와 무관한 공개 데이터라 안전하며, 주문·잔고는 절대 실전으로 가지 않는다.
-    QUOTE_PREFIX = "/krstock/quote/"
+    QUOTE_PREFIX = ("/krstock/quote/", "/gbstock/quote/")
     _url_lock = threading.Lock()
 
     def __init__(self, mode: str, account: str | None = None):

@@ -72,6 +72,31 @@
   </label>
 </div>
 
+<div class="card">
+  <h2>🇺🇸 미국 주식</h2>
+  <label style="display:flex;gap:8px;align-items:center;color:var(--fg)">
+    <input type="checkbox" name="us_enabled" style="width:auto" {{ 'checked' if us.enabled }}>
+    미국 주식 자동매매 사용 (국내와 예산·장부·손실한도 따로)
+  </label>
+  <div class="mute" style="margin-top:6px">증권사: <b>{{ {'nh':'NH 나무','kis':'한국투자','toss':'토스'}.get(us_broker, us_broker) }}</b>
+    · 손절·익절·확신도·최소 보유일은 국내 설정을 함께 씁니다.
+    · 자동 실행은 <code>ai-trader-us.timer</code> (뉴욕 10:30·15:00)</div>
+  <div class="grid2">
+  {% for key, label, val in us_fields %}
+    <div><label for="us_{{ key }}">{{ label }}</label>
+      <input id="us_{{ key }}" name="us_{{ key }}" value="{{ val }}" inputmode="decimal" required></div>
+  {% endfor %}
+    <div><label for="us_margin_currency">주문 통화 (NH)</label>
+      <select id="us_margin_currency" name="us_margin_currency">
+        <option value="krw" {{ 'selected' if us.margin_currency == 'krw' }}>원화로 바로 주문 (환전 불필요)</option>
+        <option value="usd" {{ 'selected' if us.margin_currency == 'usd' }}>달러 예수금 사용</option>
+      </select></div>
+  </div>
+  <label for="us_symbols">미국 종목 — 티커, 쉼표나 줄바꿈으로 구분 (최대 40개)</label>
+  <textarea id="us_symbols" name="us_symbols" rows="4">{{ us.symbols|join(', ') }}</textarea>
+  <div class="mute" style="margin-top:6px">종목당 최대 금액보다 비싼 종목은 매수 후보에서 빠집니다(소수점 매수 안 함). 미국은 자동 종목 선정 없이 이 목록만 분석해요.</div>
+</div>
+
 <div class="row" style="margin-bottom:14px"><button class="btn pri">저장</button></div>
 </form>
 

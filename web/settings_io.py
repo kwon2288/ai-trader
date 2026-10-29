@@ -24,6 +24,12 @@ AUTO_FIELDS = [
     ("universe", "auto_scan_pool", int, 20, 1000, "시세 조회 범위 (시총 상위 N개)"),
 ]
 DEFAULTS = {"auto_count": 10, "auto_min_cap_eok": 3000, "auto_min_price": 1000, "auto_scan_pool": 200}
+US_FIELDS = [
+    ("us", "total_usd", float, 10, 10_000_000, "미국 원금 ($)"),
+    ("us", "max_per_position_usd", float, 1, 10_000_000, "미국 종목당 최대 ($)"),
+    ("us", "max_positions", int, 1, 10, "미국 최대 보유 종목 수"),
+]
+US_DEFAULTS = {"total_usd": 300, "max_per_position_usd": 150, "max_positions": 2}
 ORDER_TYPES = {"market": "시장가", "limit": "지정가"}
 PROVIDER_CHOICES = {
     "claude": "Claude",
@@ -81,10 +87,18 @@ def _set(text: str, section: str, key: str, value) -> str:
     return text[:sec.end()] + block + text[end:]
 
 
-def _set_symbols(text: str, symbols: list[str]) -> str:
+def _set_symbols(text: str, symbols: list[str], section: str = "universe") -> str:
+    """[section] 블록 안의 symbols 배열만 교체."""
     body = "symbols = [\n" + "".join(f'  "{s}",\n' for s in symbols) + "]"
-    new, n = re.subn(r"^symbols\s*=\s*\[.*?\]", body, text, count=1, flags=re.M | re.S)
-    return new if n else text.rstrip() + f"\n\n[universe]\n{body}\n"
+    sec = re.search(rf"^\[{section}\]\s*$", text, re.M)
+    if not sec:
+        return text.rstrip() + f"\n\n[{section}]\n{body}\n"
+    nxt = re.search(r"^\[", text[sec.end():], re.M)
+    end = sec.end() + (nxt.start() if nxt else len(text) - sec.end())
+    block = text[sec.end():end]
+    new, n = re.subn(r"^symbols\s*=\s*\[.*?\]", body, block, count=1, flags=re.M | re.S)
+    block = new if n else block.rstrip("\n") + f"\n{body}\n"
+    return text[:sec.end()] + block + text[end:]
 
 
 def validate_and_write(path: Path, form: dict) -> list[str]:
@@ -127,6 +141,31 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
         errors.append("종목을 1개 이상 입력하세요")
     if len(symbols) > 40:
         errors.append("종목은 40개까지만 넣을 수 있습니다 (조회 시간·비용)")
+    # 미국 항목
+    us_values = {}
+    for sec, key, typ, lo, hi, label in US_FIELDS:
+        raw_v = str(form.get(f"us_{key}", US_DEFAULTS[key])).replace(",", "").replace("$", "").strip()
+        try:
+            v = typ(float(raw_v)) if typ is int else round(typ(raw_v), 2)
+        except ValueError:
+            errors.append(f"{label}: 숫자를 입력하세요"); continue
+        if not lo <= v <= hi:
+            errors.append(f"{label}: {lo} ~ {hi} 범위여야 합니다"); continue
+        us_values[(sec, key)] = v
+    if not errors and us_values[("us", "max_per_position_usd")] > us_values[("us", "total_usd")]:
+        errors.append("미국 종목당 최대 금액이 미국 원금보다 클 수 없습니다")
+    us_margin = form.get("us_margin_currency", "krw")
+    if us_margin not in ("krw", "usd"):
+        errors.append("미국 증거금 통화가 올바르지 않습니다")
+    us_symbols = [x.strip().upper() for x in re.split(r"[\s,]+", form.get("us_symbols", "")) if x.strip()]
+    bad = [x for x in us_symbols if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", x)]
+    if bad:
+        errors.append(f"미국 티커 형식 오류: {', '.join(bad)}")
+    if form.get("us_enabled") == "on" and not us_symbols:
+        errors.append("미국 주식을 켜려면 티커를 1개 이상 입력하세요")
+    if len(us_symbols) > 40:
+        errors.append("미국 종목은 40개까지만 넣을 수 있습니다")
+    us_symbols = list(dict.fromkeys(us_symbols))
     if errors:
         return errors
 
@@ -142,6 +181,12 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     text = re.sub(r"^model\s*=.*\n", "", text, flags=re.M)
     text = _set_symbols(text, list(dict.fromkeys(symbols)))
     text = _set(text, "universe", "auto_include_etf", form.get("auto_include_etf") == "on")
+    # 미국
+    text = _set(text, "us", "enabled", form.get("us_enabled") == "on")
+    for (sec, key), v in us_values.items():
+        text = _set(text, sec, key, v)
+    text = _set(text, "us", "margin_currency", us_margin)
+    text = _set_symbols(text, us_symbols, "us")
     tomllib.loads(text)  # 깨진 파일은 저장하지 않음
     tmp = path.with_suffix(".toml.tmp")
     tmp.write_text(text, encoding="utf-8")

@@ -32,30 +32,54 @@ def run_lock(cfg: Config):
         fh.close()
 
 
+def broker_name(cfg: Config) -> str:
+    """시장별 증권사. 국내 BROKER(nh|kis|toss), 미국 BROKER_US(nh|toss, 기본은 국내와 같거나 nh)."""
+    kr = os.environ.get("BROKER", "nh").strip().lower()
+    if cfg.market == "kr":
+        return kr
+    return os.environ.get("BROKER_US", kr if kr in ("nh", "toss") else "nh").strip().lower()
+
+
 def make_broker(cfg: Config):
-    broker = os.environ.get("BROKER", "nh").strip().lower()
-    if broker == "kis":
+    name = broker_name(cfg)
+    if name == "toss":
+        from .toss import TossBroker
+        return TossBroker(cfg.mode, cfg.market, cfg.data_dir)
+    if name == "kis":
+        if cfg.market != "kr":
+            raise BrokerError("한국투자증권(kis)은 이 프로그램에서 국내 주식만 지원합니다 → BROKER_US=nh 또는 toss")
         from .kis import KISBroker
         return KISBroker(cfg.mode, cfg.data_dir)
-    if broker != "nh":
-        raise BrokerError(f"BROKER 는 nh 또는 kis 여야 합니다 (현재: {broker})")
+    if name != "nh":
+        raise BrokerError(f"증권사는 nh / kis / toss 중 하나여야 합니다 (현재: {name})")
     try:
+        if cfg.market == "us":
+            from .nh_us import NHUSBroker
+            return NHUSBroker(cfg.mode, margin_currency=str(cfg.us.get("margin_currency", "krw")))
         from .broker import NHBroker
         return NHBroker(cfg.mode)
     except ImportError:
         raise BrokerError("nhplug 패키지가 없습니다 → .venv/bin/pip install -r requirements.txt") from None
 
 
+def market_cfg(cfg: Config, market: str) -> Config:
+    if market == "us" and not cfg.us_enabled:
+        raise BrokerError("미국 주식이 꺼져 있습니다 → config.toml 의 [us] enabled = true (또는 웹 설정)")
+    return cfg.for_market(market)
+
+
 def live_allowed(cfg: Config) -> bool:
     return cfg.mode != "live" or os.environ.get("I_UNDERSTAND_REAL_MONEY") == "yes"
 
 
-def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, source: str = "cli") -> str:
+def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, source: str = "cli",
+              market: str = "kr") -> str:
     """한 사이클 실행 후 결과 텍스트 반환. 결과는 일지(run_logs)에도 남긴다."""
     kind = "analyze" if analyze_only else "trade"
     with run_lock(cfg):
         j = Journal(cfg.db_path)
         try:
+            cfg = market_cfg(cfg, market)
             if not analyze_only and not live_allowed(cfg):
                 raise BrokerError("실계좌 모드는 .env 에 I_UNDERSTAND_REAL_MONEY=yes 가 있어야 실행됩니다")
             from .analyst import make_analyst
@@ -64,27 +88,29 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
             out = bot.run(force=force, analyze_only=analyze_only)
         except Exception as e:  # noqa: BLE001
             out = f"❌ 실행 오류: {e}"
-        j.add_log(cfg.mode, kind, source, out)
+        j.add_log(cfg.ledger, kind, source, out)
         return out
 
 
-def refresh_balance(cfg: Config) -> dict:
+def refresh_balance(cfg: Config, market: str = "kr") -> dict:
     """웹의 '잔고 새로고침' — 증권사에서 바로 조회해 스냅샷 갱신 (주문 없음)."""
+    cfg = market_cfg(cfg, market)
     j = Journal(cfg.db_path)
     broker = make_broker(cfg)
     bal = broker.balance()
-    bot_codes = j.bot_codes()
+    bot_codes = j.bot_codes(cfg.market)
     held = {c: h for c, h in bal.holdings.items() if c in bot_codes}
-    cash = int(j.get(f"bot_cash_{cfg.mode}") or cfg.total_krw)
-    equity = cash + sum(h.value for h in held.values())
+    cash = float(j.get(f"bot_cash_{cfg.ledger}") or cfg.total_krw)
+    cash = round(cash, 2) if cfg.currency == "USD" else int(cash)
+    equity = round(cash + sum(h.value for h in held.values()), 2)
     snap = {
         "equity": equity, "cash": cash,
         "pnl_pct": round((equity / cfg.total_krw - 1) * 100, 2),
-        "account_cash": bal.orderable_cash,
+        "account_cash": bal.orderable_cash if bal.orderable_cash != float("inf") else None,
         "positions": [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
                        "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()],
     }
-    j.save_snapshot(cfg.mode, snap)
+    j.save_snapshot(cfg.ledger, snap)
     return snap
 
 

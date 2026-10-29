@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +44,9 @@ class Config:
     auto_include_etf: bool = False
     auto_scan_pool: int = 200          # 시총 상위 몇 개를 시세 조회할지
     ai_hybrid: bool = False            # 규칙으로 먼저 거르고 신호 난 종목만 AI 확인 (토큰 절약)
+    market: str = "kr"                 # kr | us — 시장마다 예산·장부·손실한도가 따로
+    currency: str = "KRW"
+    us: dict = field(default_factory=dict)   # [us] 섹션 원본
     # 실행 모드: "dry"(주문 안 냄) | "mock"(모의투자 주문) | "live"(실계좌 주문)
     mode: str = "dry"
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
@@ -57,12 +61,50 @@ class Config:
                 + (" + 규칙 필터" if self.ai_hybrid else ""))
 
     @property
+    def ledger(self) -> str:
+        """일지에서 장부를 구분하는 키. 국내는 예전 그대로 mode, 미국은 mode_us."""
+        return self.mode if self.market == "kr" else f"{self.mode}_{self.market}"
+
+    @property
+    def us_enabled(self) -> bool:
+        return bool(self.us.get("enabled", False))
+
+    def for_market(self, market: str) -> "Config":
+        """시장별 설정. 위험관리 비율(손절·익절·확신도 등)은 공유하고 예산·종목만 바꾼다."""
+        if market == "kr":
+            return self
+        if market != "us":
+            raise ValueError(f"알 수 없는 시장: {market} (kr/us)")
+        u = self.us
+        return replace(
+            self, market="us", currency="USD",
+            total_krw=float(u.get("total_usd", 300)),               # 이름은 _krw 지만 미국에선 달러
+            max_per_position_krw=float(u.get("max_per_position_usd", 150)),
+            max_positions=int(u.get("max_positions", self.max_positions)),
+            max_orders_per_day=int(u.get("max_orders_per_day", self.max_orders_per_day)),
+            order_type=u.get("order_type", "limit"),
+            symbols=[norm_symbol(x, "us") for x in u.get("symbols", [])],
+            auto_count=0,                                            # 미국 자동 선정은 아직 미지원
+        )
+
+    def money(self, v) -> str:
+        return f"${v:,.2f}" if self.currency == "USD" else f"{v:,.0f}원"
+
+    @property
     def db_path(self) -> Path:
         return self.data_dir / "journal.db"
 
     @property
     def stop_file(self) -> Path:
         return self.data_dir / "STOP"
+
+
+def norm_symbol(code, market: str = "kr") -> str:
+    """국내: 6자리(숫자는 0 채움), 미국: 대문자 티커(BRK.B 처럼 . - 허용)."""
+    c = str(code).strip().upper()
+    if market == "kr" and c.isdigit():
+        return c.zfill(6)
+    return re.sub(r"[^A-Z0-9.\-]", "", c)
 
 
 CONFIG_PATH = ROOT / "config.toml"
@@ -105,13 +147,14 @@ def load(config_path: Path | None = None) -> Config:
         },
         ai_max_tokens=int(a.get("max_tokens", 4000)),
         ai_hybrid=bool(a.get("hybrid", True)),
-        symbols=[str(s).zfill(6) for s in raw["universe"]["symbols"]],
+        symbols=[norm_symbol(s, "kr") for s in raw["universe"]["symbols"]],
         auto_count=int(raw["universe"].get("auto_count", 10)),
         auto_min_price=int(raw["universe"].get("auto_min_price", 1000)),
         auto_min_cap_eok=int(raw["universe"].get("auto_min_cap_eok", 3000)),
         auto_include_etf=bool(raw["universe"].get("auto_include_etf", False)),
         auto_scan_pool=int(raw["universe"].get("auto_scan_pool", 200)),
         mode=mode,
+        us=dict(raw.get("us", {})),
     )
     if os.environ.get("TRADER_DATA_DIR"):
         cfg.data_dir = Path(os.environ["TRADER_DATA_DIR"])
