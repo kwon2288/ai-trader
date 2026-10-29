@@ -25,6 +25,10 @@ main{max-width:880px;margin:0 auto;padding:16px}
 .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line)}
 .b-ok{color:var(--ok);background:var(--okbg);border-color:transparent}
 .b-warn{color:var(--warn);background:var(--warnbg);border-color:transparent}
+details.acct>summary{cursor:pointer;list-style:none}
+details.acct>summary::-webkit-details-marker{display:none}
+details.acct>summary::before{content:"▸ ";color:var(--mute)}
+details.acct[open]>summary::before{content:"▾ "}
 .b-err{color:var(--err);background:var(--errbg);border-color:transparent}
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 @media(min-width:640px){.stats{grid-template-columns:repeat(4,1fr)}}

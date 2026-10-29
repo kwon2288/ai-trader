@@ -56,7 +56,11 @@
 </div>
 
 <div class="card">
-  <h2>내 계좌 전체 <span class="mute" style="font-weight:normal;font-size:13px">— 참고용, 봇은 🤖 표시분만 매매</span></h2>
+  <details class="acct">
+  <summary><h2 style="display:inline">내 계좌 전체</h2>
+    <span class="mute" style="font-size:13px">눌러서 보기</span></summary>
+  <div style="margin-top:10px">
+  <div class="mute" style="margin-bottom:8px">참고용 조회 — 봇은 🤖 표시된 수량만 매매해요.</div>
   {% set a = snap.account if snap else None %}
   {% if a %}
   <div class="stats">
@@ -83,6 +87,8 @@
   {% else %}
   <div class="mute">아래 ‘↻ 잔고 새로고침’을 누르면 계좌의 모든 보유 종목을 보여 줘요.</div>
   {% endif %}
+  </div>
+  </details>
 </div>
 
 <div class="card">
