@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}업데이트 중 · AI 자동매매{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 id="h">⬆ 업데이트 중…</h2>
+  <p class="mute" id="st">GitHub에서 받아 설치하고 있어요. 웹 화면이 잠시 끊겼다가 다시 연결돼요 (1분 이내).</p>
+  <pre class="log" id="log">시작하는 중…</pre>
+  <a class="btn" href="{{ url_for('settings') }}#update">설정으로 돌아가기</a>
+</div>
+<script>
+(function () {
+  var from = '{{ version }}', tries = 0, lost = false;
+  var h = document.getElementById('h'), st = document.getElementById('st'), lg = document.getElementById('log');
+  var t = setInterval(async function () {
+    tries++;
+    try {
+      var r = await fetch('{{ url_for("api_update_log") }}', {cache: 'no-store'});
+      if (!r.ok) throw 0;
+      var d = await r.json();
+      if (d.log) { lg.textContent = d.log; lg.scrollTop = lg.scrollHeight; }
+      if (d.done) {
+        clearInterval(t);
+        if (d.code === 0) {
+          h.textContent = d.version !== from ? '✅ 업데이트 완료 — v' + d.version : '✅ 완료';
+          st.textContent = d.version !== from ? 'v' + from + ' → v' + d.version : '이미 최신이었어요.';
+        } else { h.textContent = '❌ 업데이트 실패'; st.textContent = '아래 로그를 확인하세요. 기존 버전은 그대로 동작해요.'; }
+      } else if (lost) { st.textContent = '웹이 다시 시작됐어요. 마무리 중…'; }
+    } catch (e) { lost = true; st.textContent = '웹 화면 재시작 중… 잠시만요'; }
+    if (tries > 120) { clearInterval(t); st.textContent = '오래 걸리고 있어요. 새로고침하거나 서버 로그를 확인하세요.'; }
+  }, 2000);
+})();
+</script>
+{% endblock %}

@@ -277,6 +277,11 @@ sudo systemctl enable --now ai-trader-web
 
 ## 업데이트
 
+**웹 설정 → 업데이트** 에서 ‘업데이트 확인’ → 변경 사항 확인 → 비밀번호 입력 후 ‘업데이트 적용’.
+진행 로그가 화면에 나오고, 웹이 잠깐 재시작된 뒤 새 버전으로 바뀝니다.
+
+서버에서 직접 하려면:
+
 ```bash
 cd /opt/ai-trader
 bash deploy/update.sh      # git pull → 패키지 설치 → 웹 화면 재시작

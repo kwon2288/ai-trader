@@ -150,6 +150,40 @@
   </div>
 </div>
 
+<div class="card" id="update">
+  <h2>업데이트</h2>
+  <div class="row">
+    <span>지금 버전 <b>v{{ app_version }}</b></span>
+    {% if upd and upd.behind %}<span class="badge b-warn">새 버전 v{{ upd.latest }} 있음</span>
+    {% elif upd and not upd.error %}<span class="badge b-ok">최신</span>{% endif %}
+  </div>
+  {% if web_update %}
+  <form method="post" action="{{ url_for('update_check') }}" style="margin-top:10px"
+        onsubmit="this.querySelector('button').textContent='확인 중…'">
+    <button class="btn">🔄 업데이트 확인</button>
+    {% if upd %}<span class="mute" style="margin-left:6px">마지막 확인 {{ upd.ts[5:] }}</span>{% endif %}
+  </form>
+  {% if upd and upd.behind %}
+  <div style="margin-top:12px">
+    <b>v{{ upd.current }} → v{{ upd.latest }}</b> <span class="mute">({{ upd.behind }}개 변경)</span>
+    {% if upd.notes %}<pre class="notes">{{ upd.notes }}</pre>
+    {% else %}<ul class="mute">{% for c in upd.commits %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
+    {% if upd.dirty %}<div class="flash err">서버에서 직접 고친 파일이 있어 업데이트가 실패할 수 있어요: {{ upd.dirty|join(', ') }}</div>{% endif %}
+    <form method="post" action="{{ url_for('update_apply') }}" style="margin-top:8px"
+          onsubmit="return confirm('업데이트할까요? 웹 화면이 잠시 다시 시작됩니다.')">
+      <label for="upd_pw">웹 비밀번호 다시 입력</label>
+      <input id="upd_pw" name="password" type="password" autocomplete="current-password" required>
+      <div class="row" style="margin-top:10px"><button class="btn pri">⬆ 업데이트 적용</button></div>
+    </form>
+  </div>
+  {% endif %}
+  <div class="mute" style="margin-top:8px">GitHub 최신 코드를 받아 패키지를 설치하고 웹을 다시 시작해요 (<code>deploy/update.sh</code> 와 같음).
+    <code>.env</code> · 설정 · 기록은 그대로예요. 매매·분석이 실행 중일 땐 적용되지 않아요.</div>
+  {% else %}
+  <div class="mute" style="margin-top:6px">웹 업데이트가 꺼져 있어요 (<code>.env</code> 의 <code>WEB_UPDATE=off</code>). 서버에서 <code>bash deploy/update.sh</code></div>
+  {% endif %}
+</div>
+
 <div class="card" id="env">
   <h2>연결 정보 — 앱키 · 계좌 · AI 키</h2>
   {% if web_env %}
@@ -199,7 +233,7 @@
   <div class="mute">웹에서 연결 정보 변경이 꺼져 있어요 (<code>.env</code> 의 <code>WEB_ENV_EDIT=off</code>).
     서버의 <code>/opt/ai-trader/.env</code> 를 직접 고친 뒤 <code>systemctl restart ai-trader-web</code> 하세요.</div>
   {% endif %}
-  <div class="mute" style="margin-top:8px">웹에서 바꿀 수 없는 것: <code>I_UNDERSTAND_REAL_MONEY</code> · <code>WEB_LIVE_SWITCH</code> · <code>WEB_ENV_EDIT</code> · 포트 (서버에서만)</div>
+  <div class="mute" style="margin-top:8px">웹에서 바꿀 수 없는 것: <code>I_UNDERSTAND_REAL_MONEY</code> · <code>WEB_LIVE_SWITCH</code> · <code>WEB_ENV_EDIT</code> · <code>WEB_UPDATE</code> · 포트 (서버에서만)</div>
 </div>
 <script>
 // 실계좌를 고르면 확인 칸을 보여준다

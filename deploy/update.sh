@@ -14,6 +14,16 @@ git log --oneline HEAD..origin/main | sed 's/^/  + /'
 git pull --ff-only --quiet origin main
 
 .venv/bin/pip install --quiet -r requirements.txt
+
+# 이미 설치된 systemd 파일이 바뀌었으면 함께 갱신 (설치 안 한 것은 건드리지 않음)
+reload=0
+for f in deploy/*.service deploy/*.timer; do
+  dst="/etc/systemd/system/$(basename "$f")"
+  if [ -f "$dst" ] && ! cmp -s "$f" "$dst"; then
+    cp "$f" "$dst" && echo "  · $(basename "$f") 갱신" && reload=1
+  fi
+done
+[ "$reload" = 1 ] && systemctl daemon-reload
 if systemctl is-active --quiet ai-trader-web; then
   systemctl restart ai-trader-web && echo "↻ 웹 관리 화면 재시작"
 fi
