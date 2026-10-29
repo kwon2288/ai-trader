@@ -101,8 +101,9 @@ def refresh_balance(cfg: Config, market: str = "kr") -> dict:
     j = Journal(cfg.db_path)
     broker = make_broker(cfg)
     bal = broker.balance()
-    bot_codes = j.bot_codes(cfg.market)
-    held = {c: h for c, h in bal.holdings.items() if c in bot_codes}
+    from .bot import Bot, own_holdings
+    held = own_holdings(j, cfg, bal.holdings)
+    Bot(cfg, broker, None, j)._sync_budget()            # 웹에서 바꾼 원금 반영
     cash = float(j.get(f"bot_cash_{cfg.ledger}") or cfg.total_krw)
     cash = round(cash, 2) if cfg.currency == "USD" else int(cash)
     equity = round(cash + sum(h.value for h in held.values()), 2)

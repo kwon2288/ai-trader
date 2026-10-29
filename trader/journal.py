@@ -144,10 +144,39 @@ class Journal:
             self.db.execute("UPDATE bot_positions SET qty=? WHERE code=?", (row["qty"] - qty, code))
             self.db.commit()
 
-    def bot_lots(self, market: str = "kr") -> dict[str, tuple]:
-        """봇 보유 종목 → (봇 수량 또는 None, 봇 평단 또는 None)."""
-        return {r["code"]: (r["qty"], r["avg"]) for r in self.db.execute(
-            "SELECT code, qty, avg FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))}
+    def bot_lots(self, market: str = "kr", ledger: str | None = None) -> dict[str, tuple]:
+        """봇 보유 종목 → (봇 수량 또는 None, 봇 평단 또는 None).
+        수량을 기록하기 전(v0.6.2 이전)에 산 종목은 주문 기록에서 봇 수량·평단을 계산해 채운다."""
+        rows = [dict(r) for r in self.db.execute(
+            "SELECT code, opened, qty, avg FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))]
+        for r in rows:
+            if r["qty"] is None and ledger:
+                q, a = self._lot_from_orders(r["code"], ledger, r["opened"])
+                if q > 0:
+                    self.db.execute("UPDATE bot_positions SET qty=?, avg=? WHERE code=?", (q, a, r["code"]))
+                    self.db.commit()
+                    r["qty"], r["avg"] = q, a
+        return {r["code"]: (r["qty"], r["avg"]) for r in rows}
+
+    def _lot_from_orders(self, code: str, ledger: str, opened: str) -> tuple[int, float]:
+        qty, cost = 0, 0.0
+        for o in self.db.execute(
+                "SELECT side, qty, est_price FROM orders WHERE ok=1 AND mode=? AND code=? AND ts >= ? "
+                "AND COALESCE(order_no,'') != 'DRY' ORDER BY ts", (ledger, code, opened or "")):
+            if o["side"] == "BUY":
+                qty, cost = qty + o["qty"], cost + o["qty"] * o["est_price"]
+            else:
+                avg = cost / qty if qty else 0
+                qty = max(0, qty - o["qty"])
+                cost = avg * qty
+        return qty, (round(cost / qty, 4) if qty else 0.0)
+
+    def net_spent(self, ledger: str) -> float:
+        """봇이 지금까지 쓴 돈(매수 - 매도). 예산 변경을 장부에 반영할 때 쓴다."""
+        row = self.db.execute(
+            "SELECT COALESCE(SUM(CASE WHEN side='BUY' THEN qty*est_price ELSE -qty*est_price END),0) s "
+            "FROM orders WHERE ok=1 AND mode=? AND COALESCE(order_no,'') != 'DRY'", (ledger,)).fetchone()
+        return float(row["s"] or 0)
 
     def close_position(self, code: str) -> None:
         self.db.execute("DELETE FROM bot_positions WHERE code=?", (code,))

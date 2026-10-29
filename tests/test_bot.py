@@ -131,6 +131,7 @@ def test_drawdown_halts_and_kill_switch():
     cfg, br, _, bot = setup(decisions=[
         {"code": "000001", "action": "BUY", "amount_krw": 40_000, "confidence": 0.9, "reason": "r"}])
     bot.j.set("bot_cash_mock", "70000")  # 원금 대비 -30%
+    bot.j.set("bot_budget_mock", "100000")
     out = bot.run()
     assert br.orders == [] and "최대 손실" in out
     assert bot.j.get("halted_mock") == "1"
@@ -198,6 +199,31 @@ def test_partial_sell_keeps_rest():
     bot.run()
     assert ("SELL", "000001", 2) in br.orders
     assert bot.j.bot_lots()["000001"][0] == 2
+
+
+def test_old_position_without_qty_uses_order_history():
+    # v0.6.2 이전: 사용자 27주 + 봇 1주가 섞인 28주, 봇 장부엔 수량 없음 → 주문 기록으로 봇 몫 1주만
+    from trader.broker import OrderResult as R
+    _, br, _, bot = setup(holdings={"000001": Holding("000001", "종목1", 28, 15_000, 24_000)},
+                          prices={"000001": 24_000, "000002": 30_000, "000003": 80_000})
+    bot.j.db.execute("INSERT INTO bot_positions(code,name,opened,market) VALUES('000001','종목1','2026-01-01','kr')")
+    bot.j.add_order("mock", "BUY", "000001", "종목1", 1, 20_000, R(True, "9", "ok"), "AI")
+    out = bot.run()
+    assert "봇 몫 1주만" in out, out
+    assert ("SELL", "000001", 1) in br.orders                         # 익절(+15%)도 1주만
+    assert not any(o[2] > 1 for o in br.orders if o[1] == "000001")
+
+
+def test_budget_change_adjusts_cash():
+    from trader.broker import OrderResult as R
+    cfg, br, _, bot = setup(total_krw=100_000)
+    bot.j.set("bot_cash_mock", "80000")                               # 예전 장부: 2만원 쓴 상태, 예산 기록 없음
+    bot.j.add_order("mock", "BUY", "000009", "x", 1, 20_000, R(True, "9", "ok"), "AI")
+    bot.cfg.total_krw = 70_000                                        # 웹에서 원금 7만원으로 낮춤
+    bot._sync_budget()
+    assert bot.bot_cash == 50_000
+    bot._sync_budget()                                                # 두 번 반영되지 않음
+    assert bot.bot_cash == 50_000
 
 
 if __name__ == "__main__":

@@ -12,6 +12,23 @@ from .journal import Journal, now
 log = logging.getLogger(__name__)
 
 
+def own_holdings(j: Journal, cfg: Config, holdings: dict, say=None) -> dict:
+    """계좌 보유 중 봇 몫만. 같은 종목을 사용자가 따로 가졌으면 봇이 산 수량·평단만 본다."""
+    bot_codes = j.bot_codes(cfg.market)
+    lots = j.bot_lots(cfg.market, cfg.ledger)
+    held = {}
+    for c, h in holdings.items():
+        if c not in bot_codes:
+            continue
+        bq, ba = lots.get(c, (None, None))
+        if bq is not None and h.qty > bq:
+            if say:
+                say(f"🔒 {h.name}: 계좌 {h.qty}주 중 봇 몫 {bq}주만 관리 (나머지 {h.qty - bq}주는 사용자 보유)")
+            h = Holding(c, h.name, bq, ba or h.avg_price, h.now_price)
+        held[c] = h
+    return held
+
+
 class Bot:
     def __init__(self, cfg: Config, broker, analyst, journal: Journal | None = None):
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
@@ -32,6 +49,21 @@ class Bot:
             self.j.set(key, str(self.cfg.total_krw))
             v = self.cfg.total_krw
         return round(float(v), 2) if self.cfg.currency == "USD" else int(float(v))
+
+    def _sync_budget(self) -> None:
+        """웹에서 예산(원금)을 바꾸면 그 차이만큼 봇 현금을 늘리거나 줄인다."""
+        cfg, j = self.cfg, self.j
+        bkey, ckey = f"bot_budget_{cfg.ledger}", f"bot_cash_{cfg.ledger}"
+        total = float(cfg.total_krw)
+        prev = j.get(bkey)
+        if prev is None:
+            # 예산 기록이 없던 예전 장부: 현금 + 지금까지 쓴 돈 = 처음 예산
+            prev = (float(j.get(ckey)) + j.net_spent(cfg.ledger)) if j.get(ckey) is not None else total
+        prev = float(prev)
+        if abs(prev - total) > 0.005 and j.get(ckey) is not None:
+            self._add_cash(total - prev)
+            self.say(f"💱 원금 변경 반영: {cfg.money(prev)} → {cfg.money(total)} (봇 현금 {cfg.money(self.bot_cash)})")
+        j.set(bkey, str(total))
 
     def _add_cash(self, delta) -> None:
         new = self.bot_cash + delta
@@ -77,6 +109,8 @@ class Bot:
             self.say("⏸ 최대 손실 한도 도달로 정지된 상태입니다. 확인 후 `python run.py resume` 으로 해제하세요.")
             return self._out()
 
+        self._sync_budget()
+
         # 1) 데이터 수집
         candidates, quotes = [], {}
         bal = self.broker.balance()
@@ -87,16 +121,7 @@ class Bot:
                     self.j.close_position(code)
                     bot_codes.pop(code)
         # 봇이 산 수량만 봇 몫으로 본다 — 같은 종목을 사용자가 따로 갖고 있어도 그 주식은 건드리지 않는다
-        lots = self.j.bot_lots(cfg.market)
-        held = {}
-        for c, h in bal.holdings.items():
-            if c not in bot_codes:
-                continue
-            bq, ba = lots.get(c, (None, None))
-            if bq is not None and h.qty > bq:
-                self.say(f"🔒 {h.name}: 계좌 {h.qty}주 중 봇 몫 {bq}주만 관리 (나머지 {h.qty - bq}주는 사용자 보유)")
-                h = Holding(c, h.name, bq, ba or h.avg_price, h.now_price)
-            held[c] = h
+        held = own_holdings(self.j, cfg, bal.holdings, self.say)
         user_owned = {c for c in bal.holdings if c not in bot_codes}   # 사용자가 직접 가진 종목 → 매수 안 함
 
         def collect(codes, source):
@@ -162,9 +187,10 @@ class Bot:
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
         for c, h in list(held.items()):
             trig = None
-            if h.pnl_pct <= cfg.stop_loss_pct:
+            pnl = round(h.pnl_pct, 6)              # 부동소수 오차(14.9999…%) 방지
+            if pnl <= cfg.stop_loss_pct:
                 trig = "손절"
-            elif h.pnl_pct >= cfg.take_profit_pct:
+            elif pnl >= cfg.take_profit_pct:
                 trig = "익절"
             if trig:
                 self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig} 규칙 발동")
