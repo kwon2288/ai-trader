@@ -33,19 +33,17 @@ class KISBroker:
 
     def __init__(self, mode: str, token_dir: Path, account: str | None = None):
         self.mode = mode
-        self.env = os.environ.get("KIS_SERVER", "mock").strip().lower()
+        # 서버는 모드로 정한다(dry 는 KIS_SERVER 를 따름). KIS 는 모의/실전 앱키가 다르므로
+        # KIS_MOCK_APP_KEY / KIS_LIVE_APP_KEY 처럼 환경별 값이 있으면 그걸 먼저 쓴다.
+        self.env = mode if mode in URLS else os.environ.get("KIS_SERVER", "mock").strip().lower()
         if self.env not in URLS:
             raise BrokerError("KIS_SERVER 는 mock 또는 live 여야 합니다")
-        # 🔒 모드-서버 불일치 차단
-        if mode == "mock" and self.env != "mock":
-            raise BrokerError("TRADING_MODE=mock 인데 KIS_SERVER=live 입니다. 모의투자 서버로 바꾸세요.")
-        if mode == "live" and self.env != "live":
-            raise BrokerError("TRADING_MODE=live 인데 KIS_SERVER=mock 입니다.")
+        E = self.env.upper()
 
         self.base = URLS[self.env]
-        self.app_key = os.environ.get("KIS_APP_KEY", "").strip()
-        self.app_secret = os.environ.get("KIS_APP_SECRET", "").strip()
-        acct = (account or os.environ.get("KIS_ACCOUNT", "")).replace("-", "").strip()
+        self.app_key = (os.environ.get(f"KIS_{E}_APP_KEY") or os.environ.get("KIS_APP_KEY", "")).strip()
+        self.app_secret = (os.environ.get(f"KIS_{E}_APP_SECRET") or os.environ.get("KIS_APP_SECRET", "")).strip()
+        acct = (account or os.environ.get(f"KIS_{E}_ACCOUNT") or os.environ.get("KIS_ACCOUNT", "")).replace("-", "").strip()
         if not (self.app_key and self.app_secret):
             raise BrokerError(".env 에 KIS_APP_KEY / KIS_APP_SECRET 을 넣으세요")
         if len(acct) != 10 or not acct.isdigit():

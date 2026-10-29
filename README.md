@@ -325,13 +325,28 @@ sudo systemctl daemon-reload && sudo systemctl enable --now ai-trader-us.timer
 
 ## 실계좌로 전환
 
-`.env`에서 세 줄을 바꿉니다.
+### 웹에서 (권장)
+
+**설정 → 실행 모드** 에서 드라이런 / 모의투자 / 실계좌를 고릅니다.
+
+- 실계좌로 바꿀 때는 **웹 비밀번호 재입력 + 확인 문구(`실계좌 전환`) + 동의 체크** 가 필요합니다.
+- 바꾸기 전에 새 모드로 증권사에 **실제로 연결해 잔고를 조회**해 보고, 실패하면 바꾸지 않습니다.
+  (미국 주식을 켜 두었다면 미국 계좌도 함께 확인)
+- 증권사 서버(모의/실전)와 계좌는 모드에 맞춰 자동으로 고릅니다. `.env`를 고칠 필요가 없습니다.
+- 토스증권은 모의투자가 없어 모의투자로는 바꿀 수 없습니다.
+- 바꾼 값은 `data/mode.json`에 저장되어 `.env`의 `TRADING_MODE`보다 우선합니다.
+  ‘웹 설정 지우기’를 고르면 다시 `.env` 값을 따릅니다.
+- 웹에서 실계좌 전환을 아예 막으려면 `.env`에 `WEB_LIVE_SWITCH=off`.
+
+### `.env`에서
 
 ```ini
 TRADING_MODE=live
-NHPLUG_BASE_URL=https://api.nhplug.com:8443
 I_UNDERSTAND_REAL_MONEY=yes
 ```
+
+KIS는 모의·실전 앱키가 다르므로 `KIS_LIVE_APP_KEY` / `KIS_LIVE_APP_SECRET` / `KIS_LIVE_ACCOUNT`
+(모의는 `KIS_MOCK_...`)를 넣어 두면 웹에서 모드를 오갈 수 있습니다.
 
 모의투자 장부와 실계좌 장부는 따로 관리됩니다(`bot_cash_mock` / `bot_cash_live`). 실계좌에서도 봇은 `config.toml`의 예산까지만 씁니다.
 

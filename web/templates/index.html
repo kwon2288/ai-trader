@@ -8,8 +8,9 @@
     {% if c.mode == 'live' %}<span class="badge b-err">🔴 실계좌</span>
     {% elif c.mode == 'mock' %}<span class="badge b-ok">모의투자</span>
     {% else %}<span class="badge">드라이런 (주문 안 냄)</span>{% endif %}
+    <a class="mute" href="{{ url_for('settings') }}#mode" style="font-size:12px">모드 바꾸기</a>
     <span class="badge">🏦 {{ {'nh':'NH 나무','kis':'한국투자','toss':'토스'}.get(broker, broker) }}</span>
-    {% if broker == 'toss' and c.mode == 'mock' %}<span class="badge b-err">⚠ 토스는 모의투자 없음 → .env 를 dry 로</span>{% endif %}
+    {% if broker == 'toss' and c.mode == 'mock' %}<a class="badge b-err" href="{{ url_for('settings') }}#mode">⚠ 토스는 모의투자 없음 → 모드 바꾸기</a>{% endif %}
     <span class="badge">🧠 {{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT','consensus':'다수결','rules':'규칙만'}.get(c.ai_provider, c.ai_provider) }}{% if c.ai_hybrid and c.ai_provider != 'rules' %} + 규칙필터{% endif %}</span>
 
     {% if busy %}<span class="badge b-warn" id="busy">⏳ 실행 중…</span>

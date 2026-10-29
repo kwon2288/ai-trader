@@ -55,6 +55,27 @@ def test_url_restored_after_quote_error():
     assert os.environ["NHPLUG_BASE_URL"].startswith("https://moapi.")
 
 
+def test_mode_decides_server_and_account():
+    seen = []
+    accts = [{"acct_no": "50001234567", "acct_type": "03"}, {"acct_no": "70001111111", "acct_type": "01"}]
+
+    def call(path, body):
+        seen.append((path, os.environ["NHPLUG_BASE_URL"], body))
+        if path == "/n2/acctinfo":
+            return {"Output_0": accts}
+        return {"Output_0": {"mkt_orr_no": 1}}
+
+    nhplug.call = call
+    live = B.NHBroker("live")          # .env 는 moapi 지만 실계좌 모드면 실전 서버 + 실계좌
+    assert live.env == "live" and live.account == "70001111111"
+    seen.clear()
+    live.buy("069500", 1, 40000)
+    assert seen[-1][1].startswith("https://api.") and seen[-1][2]["act_no"] == "70001111111"
+    mock = B.NHBroker("mock")
+    assert mock.env == "mock" and mock.account == "50001234567"
+    assert os.environ["NHPLUG_BASE_URL"].startswith("https://moapi.")   # .env 값은 그대로
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

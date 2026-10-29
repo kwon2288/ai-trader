@@ -94,13 +94,18 @@ def test_live_tr_ids_and_dry_never_posts():
     assert not any(c[0] == "POST" for c in d.session.calls)
 
 
-def test_mode_server_mismatch_blocked():
-    for mode, server in [("mock", "live"), ("live", "mock")]:
-        try:
-            make(mode, server)
-        except BrokerError:
-            continue
-        raise AssertionError(f"{mode}/{server} 가 막히지 않음")
+def test_mode_decides_server():
+    # 웹에서 모드를 바꿔도 되도록 서버는 모드가 정한다 (KIS_SERVER 는 dry 일 때만)
+    assert make("mock", "live").env == "mock"
+    assert make("live", "mock").env == "live"
+    assert make("dry", "live").env == "live"
+    os.environ.update(KIS_LIVE_APP_KEY="LK", KIS_LIVE_ACCOUNT="87654321-01")
+    try:
+        b = make("live", "mock")
+        assert b.app_key == "LK"
+    finally:
+        for k in ("KIS_LIVE_APP_KEY", "KIS_LIVE_ACCOUNT"):
+            os.environ.pop(k, None)
 
 
 def test_bad_account_rejected():

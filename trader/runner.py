@@ -69,7 +69,10 @@ def market_cfg(cfg: Config, market: str) -> Config:
 
 
 def live_allowed(cfg: Config) -> bool:
-    return cfg.mode != "live" or os.environ.get("I_UNDERSTAND_REAL_MONEY") == "yes"
+    """실계좌 주문 허용: .env 의 I_UNDERSTAND_REAL_MONEY=yes 또는 웹에서 확인 절차를 거쳐 전환한 경우."""
+    if cfg.mode != "live":
+        return True
+    return os.environ.get("I_UNDERSTAND_REAL_MONEY") == "yes" or (cfg.mode_source == "web" and cfg.live_ack)
 
 
 def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, source: str = "cli",
@@ -81,7 +84,7 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
         try:
             cfg = market_cfg(cfg, market)
             if not analyze_only and not live_allowed(cfg):
-                raise BrokerError("실계좌 모드는 .env 에 I_UNDERSTAND_REAL_MONEY=yes 가 있어야 실행됩니다")
+                raise BrokerError("실계좌 모드는 웹 설정에서 확인 절차를 거쳐 전환하거나 .env 에 I_UNDERSTAND_REAL_MONEY=yes 가 있어야 실행됩니다")
             from .analyst import make_analyst
             from .bot import Bot
             bot = Bot(cfg, make_broker(cfg), make_analyst(cfg), j)

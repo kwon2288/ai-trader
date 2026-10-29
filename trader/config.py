@@ -49,6 +49,8 @@ class Config:
     us: dict = field(default_factory=dict)   # [us] 섹션 원본
     # 실행 모드: "dry"(주문 안 냄) | "mock"(모의투자 주문) | "live"(실계좌 주문)
     mode: str = "dry"
+    mode_source: str = "env"          # env=.env 의 TRADING_MODE, web=웹에서 바꿈(data/mode.json)
+    live_ack: bool = False            # 웹에서 실계좌 전환 확인을 거쳤는지
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
 
     @property
@@ -127,6 +129,12 @@ def load(config_path: Path | None = None) -> Config:
     mode = os.environ.get("TRADING_MODE", "dry").strip().lower()
     if mode not in {"dry", "mock", "live"}:
         raise ValueError(f"TRADING_MODE 는 dry/mock/live 중 하나여야 합니다 (현재: {mode})")
+    data_dir = Path(os.environ["TRADER_DATA_DIR"]) if os.environ.get("TRADER_DATA_DIR") else ROOT / "data"
+    from . import modefile
+    override = modefile.read(data_dir)          # 웹에서 바꾼 모드가 있으면 그게 우선
+    mode_source, live_ack = "env", False
+    if override:
+        mode, mode_source, live_ack = override["mode"], "web", bool(override.get("live_ack"))
     cfg = Config(
         total_krw=int(b["total_krw"]),
         max_per_position_krw=int(b["max_per_position_krw"]),
@@ -153,10 +161,9 @@ def load(config_path: Path | None = None) -> Config:
         auto_min_cap_eok=int(raw["universe"].get("auto_min_cap_eok", 3000)),
         auto_include_etf=bool(raw["universe"].get("auto_include_etf", False)),
         auto_scan_pool=int(raw["universe"].get("auto_scan_pool", 200)),
-        mode=mode,
+        mode=mode, mode_source=mode_source, live_ack=live_ack,
         us=dict(raw.get("us", {})),
+        data_dir=data_dir,
     )
-    if os.environ.get("TRADER_DATA_DIR"):
-        cfg.data_dir = Path(os.environ["TRADER_DATA_DIR"])
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     return cfg

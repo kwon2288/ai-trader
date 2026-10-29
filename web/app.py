@@ -3,7 +3,9 @@
   .venv/bin/python -m web.app          # http://<LXC IP>:8080
   .env 의 WEB_PASSWORD 로 로그인합니다.
 
-보안상 웹에서 할 수 없는 일: 실계좌 전환, 앱키 변경 (서버의 .env 에서만).
+보안상 웹에서 할 수 없는 일: 앱키·계좌번호 변경 (서버의 .env 에서만).
+실계좌 전환은 웹에서 가능하지만 비밀번호 재입력 + 확인 문구 + 연결 확인을 거친다
+(.env 에 WEB_LIVE_SWITCH=off 면 웹에서 실계좌로 못 바꿈).
 """
 from __future__ import annotations
 
@@ -246,12 +248,95 @@ def settings():
     from trader.runner import broker_name
     us_broker = broker_name(cfg().for_market("us"))
     from trader.analyst import PROVIDERS, available
-    return render_template("settings.html", c=cfg(), fields=fields, raw=raw, auto_fields=auto_fields,
+    return render_template("settings.html", c=cfg(), fields=fields,
+                           mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
+                           env_mode=os.environ.get("TRADING_MODE", "dry").strip().lower(), raw=raw, auto_fields=auto_fields,
                            us_fields=us_fields, us=us_raw, us_broker=us_broker,
                            order_types=settings_io.ORDER_TYPES, providers=settings_io.PROVIDER_CHOICES,
                            model_fields=settings_io.MODEL_FIELDS,
                            keys={p: available(p) for p in PROVIDERS},
                            key_labels={p: i["label"] for p, i in PROVIDERS.items()})
+
+
+# ── 실행 모드 전환 ─────────────────────────────────────
+MODE_LABEL = {"dry": "드라이런 (주문 안 냄)", "mock": "모의투자", "live": "실계좌"}
+LIVE_PHRASE = "실계좌 전환"
+
+
+def _web_live_switch() -> bool:
+    return os.environ.get("WEB_LIVE_SWITCH", "on").strip().lower() not in ("off", "no", "0", "false")
+
+
+def _mode_markets(c) -> list[str]:
+    return ["kr"] + (["us"] if c.us_enabled else [])
+
+
+def _check_mode(c, new: str) -> tuple[list[str], list[str]]:
+    """새 모드로 증권사에 실제로 붙어 보고 (오류, 결과 요약) 반환. 실패하면 전환하지 않는다."""
+    from dataclasses import replace
+    from trader.runner import broker_name, make_broker
+    errs, info = [], []
+    for mk in _mode_markets(c):
+        mc = replace(c, mode=new).for_market(mk)
+        name = broker_name(mc)
+        flag = "🇰🇷" if mk == "kr" else "🇺🇸"
+        if new == "mock" and name == "toss":
+            errs.append(f"{flag} 토스증권은 모의투자가 없습니다 (드라이런 또는 실계좌만 가능)")
+            continue
+        if new == "dry":
+            continue
+        try:
+            b = make_broker(mc)
+            bal = b.balance()
+            cash = "확인 필요" if bal.orderable_cash == float("inf") else mc.money(bal.orderable_cash)
+            info.append(f"{flag} {name} 계좌 {getattr(b, 'account', '-')} · 주문가능 {cash}")
+        except Exception as e:  # noqa: BLE001
+            errs.append(f"{flag} {name} {MODE_LABEL[new]} 연결 실패: {e}")
+    return errs, info
+
+
+@app.post("/mode")
+@login_required
+def change_mode():
+    from trader import modefile
+    c = cfg()
+    new = request.form.get("mode", "")
+    if new == "env":                                   # 웹 설정을 지우고 .env 값으로
+        modefile.clear(c.data_dir)
+        flash(f"웹 모드 설정을 지웠습니다. 이제 .env 의 TRADING_MODE 를 따릅니다 (현재 {cfg().mode}).", "ok")
+        return redirect(url_for("settings"))
+    if new not in modefile.MODES:
+        flash("알 수 없는 모드입니다.", "err")
+        return redirect(url_for("settings"))
+    if _busy(c):
+        flash("실행 중에는 모드를 바꿀 수 없습니다. 끝난 뒤 다시 시도하세요.", "err")
+        return redirect(url_for("settings"))
+    if new == "live":
+        if not _web_live_switch():
+            flash("웹에서 실계좌 전환이 꺼져 있습니다 (.env 의 WEB_LIVE_SWITCH=off).", "err")
+            return redirect(url_for("settings"))
+        pw = os.environ.get("WEB_PASSWORD", "")
+        if not (pw and hmac.compare_digest(request.form.get("password", ""), pw)):
+            flash("비밀번호가 맞지 않습니다.", "err")
+            return redirect(url_for("settings"))
+        if request.form.get("phrase", "").strip() != LIVE_PHRASE:
+            flash(f"확인 문구를 정확히 입력하세요: {LIVE_PHRASE}", "err")
+            return redirect(url_for("settings"))
+        if not request.form.get("agree"):
+            flash("실제 돈으로 주문된다는 데 동의해야 합니다.", "err")
+            return redirect(url_for("settings"))
+    errs, info = _check_mode(c, new)
+    if errs:
+        for e in errs:
+            flash(e, "err")
+        flash(f"{MODE_LABEL[new]}(으)로 바꾸지 않았습니다.", "err")
+        return redirect(url_for("settings"))
+    old = c.mode
+    modefile.write(c.data_dir, new, live_ack=(new == "live"))
+    msg = f"실행 모드: {MODE_LABEL[old]} → {MODE_LABEL[new]}" + ("".join("\n" + x for x in info))
+    Journal(c.db_path).add_log(new, "mode", "web", msg)
+    flash(("🔴 " if new == "live" else "") + msg.replace("\n", " · ") + " — 다음 실행부터 적용됩니다.", "ok")
+    return redirect(url_for("settings"))
 
 
 # ── 동작 ───────────────────────────────────────────────

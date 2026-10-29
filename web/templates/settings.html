@@ -100,14 +100,64 @@
 <div class="row" style="margin-bottom:14px"><button class="btn pri">저장</button></div>
 </form>
 
+<div class="card" id="mode">
+  <h2>실행 모드</h2>
+  <div class="row">
+    현재 {% if c.mode == 'live' %}<span class="badge b-err">🔴 실계좌</span>
+    {% elif c.mode == 'mock' %}<span class="badge b-ok">모의투자</span>
+    {% else %}<span class="badge">드라이런 (주문 안 냄)</span>{% endif %}
+    <span class="mute">{{ '웹에서 설정함' if c.mode_source == 'web' else '.env 의 TRADING_MODE' }}</span>
+  </div>
+  <form method="post" action="{{ url_for('change_mode') }}" id="modeform" style="margin-top:10px">
+    <label for="mode_sel">바꿀 모드</label>
+    <select id="mode_sel" name="mode">
+      <option value="dry" {{ 'selected' if c.mode == 'dry' }}>드라이런 — 분석만, 주문 안 냄</option>
+      <option value="mock" {{ 'selected' if c.mode == 'mock' }}>모의투자 — 가상 계좌로 주문</option>
+      {% if web_live %}<option value="live" {{ 'selected' if c.mode == 'live' }}>🔴 실계좌 — 실제 돈으로 주문</option>{% endif %}
+      {% if c.mode_source == 'web' %}<option value="env">웹 설정 지우기 (.env 값 {{ env_mode }} 따르기)</option>{% endif %}
+    </select>
+    <div id="livebox" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--err,#c33);border-radius:8px">
+      <b>실계좌로 바꾸면 다음 자동 실행부터 실제 돈으로 주문합니다.</b>
+      <ul class="mute" style="margin:6px 0 8px;padding-left:18px">
+        <li>바꾸기 전에 증권사 실계좌에 실제로 연결해 보고, 실패하면 바꾸지 않아요.</li>
+        <li>모의투자와 장부가 따로라 실계좌는 예산 {{ "{:,}".format(c.total_krw|int) }}원부터 새로 시작해요.</li>
+        <li>실계좌 계좌에 예산 이상의 현금이 있어야 해요. 봇은 예산 안에서만 주문합니다.</li>
+      </ul>
+      <label for="password">웹 비밀번호 다시 입력</label>
+      <input id="password" name="password" type="password" autocomplete="current-password">
+      <label for="phrase">확인 문구 — <b>{{ live_phrase }}</b> 를 그대로 입력</label>
+      <input id="phrase" name="phrase" autocomplete="off" placeholder="{{ live_phrase }}">
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--fg)">
+        <input type="checkbox" name="agree" style="width:auto"> 실제 돈으로 주문되고 손실이 날 수 있음을 이해합니다
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="modebtn">모드 바꾸기</button></div>
+  </form>
+  <div class="mute" style="margin-top:8px">
+    모드는 다음 실행부터 적용돼요. 바꿀 때 증권사 연결을 먼저 확인하므로 10초쯤 걸릴 수 있어요.
+    {% if not web_live %}<br>웹에서 실계좌 전환은 꺼져 있어요 (.env 의 <code>WEB_LIVE_SWITCH=off</code>).{% endif %}
+  </div>
+</div>
+
 <div class="card">
   <h2>서버에서만 바꿀 수 있는 항목</h2>
   <div class="mute">
-    실행 모드: <b>{{ c.mode }}</b> · 앱키 · 계좌번호 · 실계좌 전환은 보안상 웹에서 바꿀 수 없습니다.<br>
+    앱키 · 계좌번호 · AI API 키는 보안상 웹에서 바꿀 수 없습니다.<br>
     서버의 <code>/opt/ai-trader/.env</code> 를 수정한 뒤 <code>systemctl restart ai-trader-web</code> 하세요.
   </div>
 </div>
 <script>
+// 실계좌를 고르면 확인 칸을 보여준다
+(function () {
+  var sel = document.getElementById('mode_sel'), box = document.getElementById('livebox');
+  var form = document.getElementById('modeform');
+  function sync() { box.style.display = sel.value === 'live' ? 'block' : 'none'; }
+  sel.addEventListener('change', sync); sync();
+  form.addEventListener('submit', function (e) {
+    if (sel.value === 'live' && !confirm('정말 실계좌로 바꿀까요? 다음 실행부터 실제 주문이 나갑니다.')) e.preventDefault();
+    else document.getElementById('modebtn').textContent = '확인 중…';
+  });
+})();
 // '직접 입력…'을 고르면 입력칸을 보여준다
 document.querySelectorAll('.model-select').forEach(function (sel) {
   var box = sel.parentElement.querySelector('.model-custom');

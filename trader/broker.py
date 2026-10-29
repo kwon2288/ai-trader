@@ -103,38 +103,61 @@ class NHBroker:
     QUOTE_PREFIX = ("/krstock/quote/", "/gbstock/quote/")
     _url_lock = threading.Lock()
 
+    URLS = {"mock": "https://moapi.nhplug.com:8443", "live": "https://api.nhplug.com:8443"}
+
     def __init__(self, mode: str, account: str | None = None):
         from nhplug import call, get_base_url, status_of  # 지연 import (테스트에서 불필요)
 
         self._call, self._status_of = call, status_of
         self.mode = mode
-        base = get_base_url()
-        host = base.split("//")[-1].split("/")[0].lower()
-        self.env = "mock" if host.startswith("moapi.") else "live"
+        env_base = get_base_url()
+
+        def env_of(url: str) -> str:
+            return "mock" if url.split("//")[-1].split("/")[0].lower().startswith("moapi.") else "live"
+
+        # 서버는 모드로 정한다 (웹에서 모의↔실계좌를 바꿔도 .env 를 고칠 필요 없게).
+        # dry 는 .env 의 NHPLUG_BASE_URL 을 따른다. .env 주소가 같은 환경이면 그 주소(포트 등)를 존중.
+        if mode in self.URLS:
+            self.env = mode
+            base = env_base if env_of(env_base) == mode else self.URLS[mode]
+        else:
+            self.env, base = env_of(env_base), env_base
         self._base = base
         self._quote_base = base.replace("://moapi.", "://api.", 1) if self.env == "mock" else base
 
-        # 🔒 모드-도메인 불일치 차단: 모의투자 모드인데 실서버로 주문 나가는 사고 방지
-        if mode == "mock" and self.env != "mock":
-            raise BrokerError("TRADING_MODE=mock 인데 NHPLUG_BASE_URL 이 운영(api) 서버입니다. "
-                              "moapi.nhplug.com:8443 으로 바꾸세요.")
-        if mode == "live" and self.env != "live":
-            raise BrokerError("TRADING_MODE=live 인데 NHPLUG_BASE_URL 이 모의투자(moapi) 서버입니다.")
+        self.account = (account or os.environ.get(f"NHPLUG_ACCOUNT_{self.env.upper()}")
+                        or self._checked(os.environ.get("NHPLUG_ACCOUNT")) or self._pick_account())
 
-        self.account = account or os.environ.get("NHPLUG_ACCOUNT") or self._pick_account()
+    def _checked(self, acct: str | None) -> str | None:
+        """NHPLUG_ACCOUNT 가 지금 환경(모의/실계좌)의 계좌가 아니면 무시하고 자동 선택한다.
+        (모의투자 때 넣어 둔 계좌번호로 실계좌 주문이 나가려다 실패하는 일 방지)"""
+        if not acct or self.mode == "dry":
+            return acct
+        try:
+            rows = self._post("/n2/acctinfo", {}).get("Output_0")
+        except Exception:  # noqa: BLE001
+            return acct
+        if not isinstance(rows, list) or not rows:
+            return acct
+        want = {"03"} if self.env == "mock" else {"01", "02"}
+        mine = {str(r.get("acct_no", "")).strip() for r in rows if (r.get("acct_type") or "").strip() in want}
+        return acct if acct in mine else None
 
     # ── 공통 ────────────────────────────────────────────
     def _post(self, path: str, body: dict) -> dict:
-        if self._quote_base != self._base and path.startswith(self.QUOTE_PREFIX):
-            with self._url_lock:  # 웹·타이머 스레드가 동시에 불러도 주소가 섞이지 않게
-                os.environ["NHPLUG_BASE_URL"] = self._quote_base
-                try:
-                    data = self._call(path, body)
-                finally:
-                    os.environ["NHPLUG_BASE_URL"] = self._base
-        else:
-            with self._url_lock:
+        # nhplug 는 환경변수로 서버를 고른다 → 호출마다 잠금 안에서 이번 요청의 서버로 맞췄다가 되돌린다.
+        # 모의투자 서버는 시세를 주지 않아 시세만 실전 서버로 보낸다(공개 데이터). 주문·잔고는 절대 섞이지 않는다.
+        target = self._quote_base if path.startswith(self.QUOTE_PREFIX) else self._base
+        with self._url_lock:
+            prev = os.environ.get("NHPLUG_BASE_URL")
+            os.environ["NHPLUG_BASE_URL"] = target
+            try:
                 data = self._call(path, body)
+            finally:
+                if prev is None:
+                    os.environ.pop("NHPLUG_BASE_URL", None)
+                else:
+                    os.environ["NHPLUG_BASE_URL"] = prev
         return data if isinstance(data, dict) else {}
 
     def _msg(self, data: dict) -> str:
