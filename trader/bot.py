@@ -5,6 +5,7 @@ import logging
 import math
 
 from . import indicators
+from .broker import Holding
 from .config import Config
 from .journal import Journal, now
 
@@ -57,7 +58,9 @@ class Bot:
         if self.cfg.mode != "dry":
             self._add_cash(-amt if side == "BUY" else amt)
             if side == "BUY":
-                self.j.open_position(code, name, self.cfg.market)
+                self.j.open_position(code, name, self.cfg.market, qty, est_price)
+            else:
+                self.j.reduce_position(code, qty)
         return True
 
     # ── 메인 ────────────────────────────────────────────
@@ -83,7 +86,18 @@ class Bot:
                 if code not in bal.holdings:
                     self.j.close_position(code)
                     bot_codes.pop(code)
-        held = {c: h for c, h in bal.holdings.items() if c in bot_codes}
+        # 봇이 산 수량만 봇 몫으로 본다 — 같은 종목을 사용자가 따로 갖고 있어도 그 주식은 건드리지 않는다
+        lots = self.j.bot_lots(cfg.market)
+        held = {}
+        for c, h in bal.holdings.items():
+            if c not in bot_codes:
+                continue
+            bq, ba = lots.get(c, (None, None))
+            if bq is not None and h.qty > bq:
+                self.say(f"🔒 {h.name}: 계좌 {h.qty}주 중 봇 몫 {bq}주만 관리 (나머지 {h.qty - bq}주는 사용자 보유)")
+                h = Holding(c, h.name, bq, ba or h.avg_price, h.now_price)
+            held[c] = h
+        user_owned = {c for c in bal.holdings if c not in bot_codes}   # 사용자가 직접 가진 종목 → 매수 안 함
 
         def collect(codes, source):
             for code in codes:
@@ -157,7 +171,6 @@ class Bot:
                 qty = min(h.qty, self.broker.sellable_qty(c)) if cfg.mode != "dry" else h.qty
                 if qty > 0 and not analyze_only and self._exec("SELL", c, h.name, qty, quotes[c].bid or h.now_price, trig):
                     if qty >= h.qty:
-                        self.j.close_position(c)
                         held.pop(c)
 
         # 4) 하이브리드: 규칙이 먼저 신호를 찾고, 신호 난 종목만 AI 에게 확인 (신호 없으면 AI 생략)
@@ -259,7 +272,6 @@ class Bot:
             ok = self._exec("SELL", c, h.name, qty, quotes[c].bid or quotes[c].price, "AI")
             note(d, "매도 실행" if ok else "매도 실패")
             if ok and qty >= h.qty:
-                self.j.close_position(c)
                 held.pop(c)
 
         cash = min(self.bot_cash, bal.orderable_cash) if cfg.mode != "dry" else self.bot_cash
@@ -270,6 +282,8 @@ class Bot:
                 note(d, "무시 (후보 목록 밖)"); continue
             if c in held:
                 note(d, "무시 (이미 보유 — 추가매수 안 함)"); continue
+            if c in user_owned:
+                note(d, "무시 (사용자가 직접 보유한 종목 — 섞이지 않게 매수 안 함)"); continue
             if q.warnings:
                 note(d, f"거부 (경고 종목: {', '.join(q.warnings)})"); continue
             if d["confidence"] < cfg.min_confidence:

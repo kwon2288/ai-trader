@@ -167,6 +167,39 @@ def test_warning_stock_rejected():
     assert br.orders == []
 
 
+def test_user_holdings_untouched():
+    # 사용자가 직접 가진 종목(000002 10주)은 사지도 팔지도 않는다
+    _, br, ai, bot = setup(decisions=[
+        {"code": "000002", "action": "BUY", "amount_krw": 30_000, "confidence": 0.9, "reason": "r"},
+        {"code": "000002", "action": "SELL", "sell_ratio": 1, "confidence": 0.9, "reason": "r"}],
+        holdings={"000002": Holding("000002", "종목2", 10, 20_000, 30_000)})
+    out = bot.run()
+    assert br.orders == [], out
+    assert "사용자가 직접 보유" in out and "봇 보유 종목 아님" in out
+    assert all(p["code"] != "000002" for p in ai.ctx["portfolio"]["positions"])
+
+
+def test_bot_sells_only_its_own_shares():
+    # 봇이 3주 산 뒤 사용자가 같은 종목을 7주 더 사서 계좌엔 10주 → 손절 때도 봇 몫 3주만 판다
+    _, br, _, bot = setup(holdings={"000001": Holding("000001", "종목1", 10, 22_000, 20_000)})
+    bot.j.open_position("000001", "종목1", "kr", 3, 25_000)      # 봇 평단 25,000 → 현재 20,000 = -20% 손절
+    out = bot.run()
+    assert ("SELL", "000001", 3) in br.orders and not any(o[2] > 3 for o in br.orders if o[1] == "000001"), out
+    assert "봇 몫 3주만" in out
+    assert "000001" not in bot.j.bot_codes()
+
+
+def test_partial_sell_keeps_rest():
+    _, br, _, bot = setup(decisions=[
+        {"code": "000001", "action": "SELL", "sell_ratio": 0.5, "confidence": 0.9, "reason": "r"}],
+        holdings={"000001": Holding("000001", "종목1", 4, 20_000, 20_500)})
+    bot.j.open_position("000001", "종목1", "kr", 4, 20_000)
+    bot.j.db.execute("UPDATE bot_positions SET opened='2026-01-01'")
+    bot.run()
+    assert ("SELL", "000001", 2) in br.orders
+    assert bot.j.bot_lots()["000001"][0] == 2
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

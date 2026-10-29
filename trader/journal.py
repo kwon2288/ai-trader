@@ -36,7 +36,9 @@ class Journal:
         # 예전 DB 호환: 나중에 추가된 칸
         for sql in ("ALTER TABLE runs ADD COLUMN ai TEXT",                       # 어떤 AI가 판단했는지
                     "ALTER TABLE bot_positions ADD COLUMN market TEXT DEFAULT 'kr'",
-                    "ALTER TABLE decisions ADD COLUMN name TEXT"):                    # 종목명  # 국내/미국
+                    "ALTER TABLE decisions ADD COLUMN name TEXT",
+                    "ALTER TABLE bot_positions ADD COLUMN qty INTEGER",                # 봇이 산 수량
+                    "ALTER TABLE bot_positions ADD COLUMN avg REAL"):                   # 봇 평단                    # 종목명  # 국내/미국
             try:
                 self.db.execute(sql)
                 self.db.commit()
@@ -118,10 +120,34 @@ class Journal:
         return {r["code"]: r["opened"] for r in self.db.execute(
             "SELECT * FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))}
 
-    def open_position(self, code: str, name: str, market: str = "kr") -> None:
-        self.db.execute("INSERT OR IGNORE INTO bot_positions(code,name,opened,market) VALUES(?,?,?,?)",
-                        (code, name, now().date().isoformat(), market))
+    def open_position(self, code: str, name: str, market: str = "kr",
+                      qty: int | None = None, price: float | None = None) -> None:
+        row = self.db.execute("SELECT qty, avg FROM bot_positions WHERE code=?", (code,)).fetchone()
+        if row is None:
+            self.db.execute("INSERT INTO bot_positions(code,name,opened,market,qty,avg) VALUES(?,?,?,?,?,?)",
+                            (code, name, now().date().isoformat(), market, qty, price))
+        elif qty and row["qty"] is not None:
+            q0, a0 = row["qty"], row["avg"] or price or 0
+            q1 = q0 + qty
+            self.db.execute("UPDATE bot_positions SET qty=?, avg=? WHERE code=?",
+                            (q1, round((q0 * a0 + qty * (price or a0)) / q1, 4), code))
         self.db.commit()
+
+    def reduce_position(self, code: str, qty: int) -> None:
+        """봇이 판 만큼 줄이고, 다 팔면 장부에서 지운다. 수량을 모르는 예전 기록은 그냥 지운다."""
+        row = self.db.execute("SELECT qty FROM bot_positions WHERE code=?", (code,)).fetchone()
+        if row is None:
+            return
+        if row["qty"] is None or row["qty"] - qty <= 0:
+            self.close_position(code)
+        else:
+            self.db.execute("UPDATE bot_positions SET qty=? WHERE code=?", (row["qty"] - qty, code))
+            self.db.commit()
+
+    def bot_lots(self, market: str = "kr") -> dict[str, tuple]:
+        """봇 보유 종목 → (봇 수량 또는 None, 봇 평단 또는 None)."""
+        return {r["code"]: (r["qty"], r["avg"]) for r in self.db.execute(
+            "SELECT code, qty, avg FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))}
 
     def close_position(self, code: str) -> None:
         self.db.execute("DELETE FROM bot_positions WHERE code=?", (code,))
