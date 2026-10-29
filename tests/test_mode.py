@@ -9,8 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.update(TRADER_DATA_DIR=tempfile.mkdtemp(), WEB_PASSWORD="secret-pass", TRADING_MODE="mock", BROKER="nh")
 os.environ.pop("I_UNDERSTAND_REAL_MONEY", None)
 
-from trader import config as cfgmod, modefile, runner  # noqa: E402
-from trader.broker import Balance, BrokerError  # noqa: E402
+from trader import config as cfgmod, envfile, modefile, runner  # noqa: E402
+from trader.broker import AccountChoice, Balance, BrokerError  # noqa: E402
+
+_ENV = Path(os.environ["TRADER_DATA_DIR"]) / ".env"
+for f in (envfile.update, envfile.read, envfile.ensure):
+    f.__defaults__ = (_ENV,)
 
 calls = []
 
@@ -23,11 +27,16 @@ class FakeBroker:
         calls.append(self.cfg.mode)
         if os.environ.get("FAIL_LIVE") and self.cfg.mode == "live":
             raise BrokerError("인증 실패")
+        if os.environ.get("MULTI_LIVE") and self.cfg.mode == "live" and not os.environ.get("NHPLUG_ACCOUNT_LIVE"):
+            raise AccountChoice("여러 개", "live", ["111", "222"])
         return Balance(orderable_cash=500000, holdings={})
 
 
 runner.make_broker = FakeBroker
+import web.app as webapp  # noqa: E402
 from web.app import app  # noqa: E402
+
+webapp._describe_accounts = lambda cands, mode: [[a, "주문가능 1원"] for a in cands]
 
 app.config["WTF_CSRF_ENABLED"] = False
 
@@ -113,6 +122,29 @@ def test_web_live_switch_off():
         assert cfgmod.load().mode == "mock"
     finally:
         os.environ.pop("WEB_LIVE_SWITCH")
+
+
+def test_multiple_accounts_choose_one():
+    modefile.clear(d())
+    os.environ["MULTI_LIVE"] = "1"
+    os.environ.pop("NHPLUG_ACCOUNT_LIVE", None)
+    live = {"mode": "live", "password": "secret-pass", "phrase": "실계좌 전환", "agree": "on"}
+    try:
+        c = client()
+        c.post("/mode", data=live)
+        assert cfgmod.load().mode == "mock"
+        html = c.get("/settings").get_data(as_text=True)
+        assert 'name="account"' in html and "222" in html
+        c.post("/mode", data={**live, "account": "999"})          # 후보에 없는 계좌는 거부
+        assert cfgmod.load().mode == "mock" and "NHPLUG_ACCOUNT_LIVE" not in envfile.read()
+        c.post("/mode", data=live)
+        c.post("/mode", data={**live, "account": "222"})
+        assert cfgmod.load().mode == "live"
+        assert envfile.read()["NHPLUG_ACCOUNT_LIVE"] == "222"
+        assert 'name="account"' not in c.get("/settings").get_data(as_text=True)
+    finally:
+        os.environ.pop("MULTI_LIVE")
+        os.environ.pop("NHPLUG_ACCOUNT_LIVE", None)
 
 
 if __name__ == "__main__":

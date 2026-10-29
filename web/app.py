@@ -252,6 +252,7 @@ def settings():
     from trader.analyst import PROVIDERS, available
     return render_template("settings.html", c=cfg(), fields=fields,
                            env_groups=_env_view(), web_env=_web_env_edit(),
+                           acct_choice=session.get("acct_choice"),
                            mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
                            env_mode=os.environ.get("TRADING_MODE", "dry").strip().lower(), raw=raw, auto_fields=auto_fields,
                            us_fields=us_fields, us=us_raw, us_broker=us_broker,
@@ -274,11 +275,12 @@ def _mode_markets(c) -> list[str]:
     return ["kr"] + (["us"] if c.us_enabled else [])
 
 
-def _check_mode(c, new: str) -> tuple[list[str], list[str]]:
-    """새 모드로 증권사에 실제로 붙어 보고 (오류, 결과 요약) 반환. 실패하면 전환하지 않는다."""
+def _check_mode(c, new: str) -> tuple[list[str], list[str], dict | None]:
+    """새 모드로 증권사에 실제로 붙어 보고 (오류, 결과 요약, 계좌 선택 필요 정보) 반환. 실패하면 전환하지 않는다."""
     from dataclasses import replace
+    from trader.broker import AccountChoice
     from trader.runner import broker_name, make_broker
-    errs, info = [], []
+    errs, info, choice = [], [], None
     for mk in _mode_markets(c):
         mc = replace(c, mode=new).for_market(mk)
         name = broker_name(mc)
@@ -293,9 +295,26 @@ def _check_mode(c, new: str) -> tuple[list[str], list[str]]:
             bal = b.balance()
             cash = "확인 필요" if bal.orderable_cash == float("inf") else mc.money(bal.orderable_cash)
             info.append(f"{flag} {name} 계좌 {getattr(b, 'account', '-')} · 주문가능 {cash}")
+        except AccountChoice as e:
+            if choice is None:
+                choice = {"mode": new, "env": e.env, "accounts": _describe_accounts(e.candidates, new)}
+            errs.append(f"{flag} {name} 계좌가 여러 개라 하나를 골라야 합니다 — 아래 ‘실행 모드’에서 고르세요")
         except Exception as e:  # noqa: BLE001
             errs.append(f"{flag} {name} {MODE_LABEL[new]} 연결 실패: {e}")
-    return errs, info
+    return errs, info, choice
+
+
+def _describe_accounts(cands: list[str], mode: str) -> list[list[str]]:
+    """계좌 후보마다 주문가능금액·보유 종목 수를 붙여 고르기 쉽게."""
+    from trader.broker import NHBroker
+    out = []
+    for a in cands:
+        try:
+            bal = NHBroker(mode, account=a).balance()
+            out.append([a, f"주문가능 {bal.orderable_cash:,.0f}원 · 보유 {len(bal.holdings)}종목"])
+        except Exception:  # noqa: BLE001
+            out.append([a, "잔고 조회 안 됨"])
+    return out
 
 
 @app.post("/mode")
@@ -328,12 +347,27 @@ def change_mode():
         if not request.form.get("agree"):
             flash("실제 돈으로 주문된다는 데 동의해야 합니다.", "err")
             return redirect(url_for("settings"))
-    errs, info = _check_mode(c, new)
+    acct = request.form.get("account", "").strip()
+    pending = session.get("acct_choice") or {}
+    if acct:                                           # 여러 계좌 중 하나를 고른 경우 → 환경별 계좌로 저장
+        if pending.get("mode") != new or acct not in [a for a, _ in pending.get("accounts", [])]:
+            flash("계좌 선택이 만료됐습니다. 다시 시도하세요.", "err")
+            session.pop("acct_choice", None)
+            return redirect(url_for("settings") + "#mode")
+        from trader import envfile
+        key = f"NHPLUG_ACCOUNT_{pending['env'].upper()}"
+        envfile.update({key: acct})
+        os.environ[key] = acct
+    errs, info, choice = _check_mode(c, new)
+    if choice:
+        session["acct_choice"] = choice
+    else:
+        session.pop("acct_choice", None)
     if errs:
         for e in errs:
             flash(e, "err")
         flash(f"{MODE_LABEL[new]}(으)로 바꾸지 않았습니다.", "err")
-        return redirect(url_for("settings"))
+        return redirect(url_for("settings") + "#mode")
     old = c.mode
     modefile.write(c.data_dir, new, live_ack=(new == "live"))
     msg = f"실행 모드: {MODE_LABEL[old]} → {MODE_LABEL[new]}" + ("".join("\n" + x for x in info))
@@ -353,6 +387,8 @@ ENV_GROUPS = [
         ("NHPLUG_APP_KEY", "앱키 (App Key)", "id"),
         ("NHPLUG_APP_SECRET", "앱 시크릿 (App Secret)", "secret"),
         ("NHPLUG_ACCOUNT", "계좌번호 — 여러 개일 때만", "id"),
+        ("NHPLUG_ACCOUNT_MOCK", "모의투자 계좌 — 따로 고정할 때", "id"),
+        ("NHPLUG_ACCOUNT_LIVE", "실계좌 계좌 — 따로 고정할 때", "id"),
         ("NHPLUG_ACCOUNT_US", "미국 주식 계좌 — 다를 때만", "id"),
     ]),
     ("AI API 키 — 쓸 것만", "ai", [

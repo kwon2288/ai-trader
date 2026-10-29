@@ -110,12 +110,23 @@
   </div>
   <form method="post" action="{{ url_for('change_mode') }}" id="modeform" style="margin-top:10px">
     <label for="mode_sel">바꿀 모드</label>
+    {% set sel_mode = acct_choice.mode if acct_choice else c.mode %}
     <select id="mode_sel" name="mode">
-      <option value="dry" {{ 'selected' if c.mode == 'dry' }}>드라이런 — 분석만, 주문 안 냄</option>
-      <option value="mock" {{ 'selected' if c.mode == 'mock' }}>모의투자 — 가상 계좌로 주문</option>
-      {% if web_live %}<option value="live" {{ 'selected' if c.mode == 'live' }}>🔴 실계좌 — 실제 돈으로 주문</option>{% endif %}
+      <option value="dry" {{ 'selected' if sel_mode == 'dry' }}>드라이런 — 분석만, 주문 안 냄</option>
+      <option value="mock" {{ 'selected' if sel_mode == 'mock' }}>모의투자 — 가상 계좌로 주문</option>
+      {% if web_live %}<option value="live" {{ 'selected' if sel_mode == 'live' }}>🔴 실계좌 — 실제 돈으로 주문</option>{% endif %}
       {% if c.mode_source == 'web' %}<option value="env">웹 설정 지우기 (.env 값 {{ env_mode }} 따르기)</option>{% endif %}
     </select>
+    {% if acct_choice %}
+    <div style="margin-top:10px;padding:10px;border:1px solid var(--warn);border-radius:8px">
+      <label for="account"><b>{{ mode_label[acct_choice.mode] }}에서 쓸 국내주식 계좌를 고르세요</b></label>
+      <select id="account" name="account">
+      {% for a, desc in acct_choice.accounts %}<option value="{{ a }}">{{ a }} — {{ desc }}</option>{% endfor %}
+      </select>
+      <div class="mute" style="margin-top:6px">나무 앱의 ‘국내주식’ 계좌번호와 같은 것을 고르세요 (ISA·연금저축 계좌가 아닌 것).
+        고른 계좌는 <code>NHPLUG_ACCOUNT_{{ acct_choice.env|upper }}</code> 로 저장되고, 미국 주식도 이 계좌를 씁니다.</div>
+    </div>
+    {% endif %}
     <div id="livebox" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--err,#c33);border-radius:8px">
       <b>실계좌로 바꾸면 다음 자동 실행부터 실제 돈으로 주문합니다.</b>
       <ul class="mute" style="margin:6px 0 8px;padding-left:18px">

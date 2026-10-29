@@ -95,6 +95,14 @@ class BrokerError(RuntimeError):
     pass
 
 
+class AccountChoice(BrokerError):
+    """국내주식 계좌 후보가 여러 개 — 사용자가 하나를 골라야 한다 (웹은 고르는 칸을 보여 준다)."""
+
+    def __init__(self, msg: str, env: str, candidates: list[str]):
+        super().__init__(msg)
+        self.env, self.candidates = env, candidates
+
+
 class NHBroker:
     """mode: dry | mock | live. dry 는 조회만 하고 주문은 절대 내지 않는다."""
 
@@ -181,8 +189,9 @@ class NHBroker:
         if len(ok) == 1:
             return ok[0]
         cand = ok or usable
-        raise BrokerError(f"국내주식 계좌 후보가 여러 개입니다: {cand} → .env 에 NHPLUG_ACCOUNT=<계좌번호> 지정 "
-                          "(나무 앱의 '국내주식' 계좌번호와 같은 것을 고르세요)")
+        raise AccountChoice(f"국내주식 계좌 후보가 여러 개입니다: {cand} → 웹 설정 → 실행 모드에서 고르거나 "
+                            f".env 에 NHPLUG_ACCOUNT_{self.env.upper()}=<계좌번호> "
+                            "(나무 앱의 '국내주식' 계좌번호와 같은 것)", self.env, cand)
 
     def _is_stock_account(self, act_no: str) -> bool:
         try:
