@@ -17,7 +17,8 @@
 {% for d in r.decisions %}
 <div class="dec">
   <span class="act-{{ d.action }}">{{ {'BUY':'매수','SELL':'매도','HOLD':'유지'}.get(d.action, d.action) }}</span>
-  {{ d.code }} <span class="mute">확신 {{ "%.2f"|format(d.confidence or 0) }} · {{ d.outcome }}</span>
+  {% if d.name %}<b>{{ d.name }}</b> <span class="mute">{{ d.code }}</span>{% else %}{{ d.code }}{% endif %}
+  <span class="mute">· 확신 {{ "%.2f"|format(d.confidence or 0) }} · {{ d.outcome }}</span>
   <div class="mute">{{ d.reason }}</div>
 </div>
 {% else %}<div class="mute">판단 없음</div>{% endfor %}

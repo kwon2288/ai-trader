@@ -35,7 +35,8 @@ class Journal:
         self.db.executescript(SCHEMA)
         # 예전 DB 호환: 나중에 추가된 칸
         for sql in ("ALTER TABLE runs ADD COLUMN ai TEXT",                       # 어떤 AI가 판단했는지
-                    "ALTER TABLE bot_positions ADD COLUMN market TEXT DEFAULT 'kr'"):  # 국내/미국
+                    "ALTER TABLE bot_positions ADD COLUMN market TEXT DEFAULT 'kr'",
+                    "ALTER TABLE decisions ADD COLUMN name TEXT"):                    # 종목명  # 국내/미국
             try:
                 self.db.execute(sql)
                 self.db.commit()
@@ -63,11 +64,35 @@ class Journal:
                         (market_view, json.dumps(raw, ensure_ascii=False), raw.get("_provider"), run_id))
         self.db.commit()
 
-    def add_decision(self, run_id: int, d: dict, outcome: str) -> None:
-        self.db.execute("INSERT INTO decisions VALUES(?,?,?,?,?,?,?,?)", (
-            run_id, d.get("code"), d.get("action"), d.get("amount_krw"), d.get("sell_ratio"),
-            d.get("confidence"), d.get("reason"), outcome))
+    def add_decision(self, run_id: int, d: dict, outcome: str, name: str | None = None) -> None:
+        self.db.execute(
+            "INSERT INTO decisions(run_id,code,action,amount_krw,sell_ratio,confidence,reason,outcome,name) "
+            "VALUES(?,?,?,?,?,?,?,?,?)", (
+                run_id, d.get("code"), d.get("action"), d.get("amount_krw"), d.get("sell_ratio"),
+                d.get("confidence"), d.get("reason"), outcome, name))
         self.db.commit()
+
+    # 종목명 사전 (코드 → 이름). 예전 기록처럼 이름이 없는 판단도 이름으로 보여 주려고 쓴다.
+    def names(self) -> dict[str, str]:
+        try:
+            return json.loads(self.get("names", "{}") or "{}")
+        except ValueError:
+            return {}
+
+    def remember_names(self, mapping: dict[str, str]) -> None:
+        cur = self.names()
+        new = {c: n for c, n in mapping.items() if c and n and n != c and cur.get(c) != n}
+        if new:
+            cur.update(new)
+            self.set("names", json.dumps(cur, ensure_ascii=False))
+
+    def _fill_names(self, rows: list[dict]) -> list[dict]:
+        nm = None
+        for r in rows:
+            if not r.get("name"):
+                nm = nm if nm is not None else self.names()
+                r["name"] = nm.get(r.get("code") or "", "")
+        return rows
 
     def add_order(self, mode, side, code, name, qty, est_price, res, trigger) -> None:
         self.db.execute("INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
@@ -83,10 +108,10 @@ class Journal:
 
     def recent_decisions(self, limit: int = 12, mode: str | None = None) -> list[dict]:
         rows = self.db.execute(
-            "SELECT r.ts, d.code, d.action, d.confidence, d.reason, d.outcome FROM decisions d "
+            "SELECT r.ts, d.code, d.name, d.action, d.confidence, d.reason, d.outcome FROM decisions d "
             "JOIN runs r ON r.id=d.run_id WHERE (? IS NULL OR r.mode=?) ORDER BY r.id DESC LIMIT ?",
             (mode, mode, limit)).fetchall()
-        return [dict(r) for r in rows]
+        return self._fill_names([dict(r) for r in rows])
 
     # 봇 보유 종목
     def bot_codes(self, market: str = "kr") -> dict[str, str]:
@@ -137,8 +162,8 @@ class Journal:
             "SELECT id, ts, market_view, equity, ai FROM runs WHERE mode=? AND market_view IS NOT NULL "
             "ORDER BY id DESC LIMIT ?", (mode, limit))]
         for r in runs:
-            r["decisions"] = [dict(d) for d in self.db.execute(
-                "SELECT code, action, confidence, reason, outcome FROM decisions WHERE run_id=?", (r["id"],))]
+            r["decisions"] = self._fill_names([dict(d) for d in self.db.execute(
+                "SELECT code, name, action, confidence, reason, outcome FROM decisions WHERE run_id=?", (r["id"],))])
         return runs
 
     def orders(self, mode: str, limit: int = 50) -> list[dict]:

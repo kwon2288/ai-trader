@@ -220,10 +220,13 @@ class Bot:
         decisions = [d for d in result.get("decisions", []) if isinstance(d, dict)]
 
         # 6) 위험관리 필터 → 실행 (매도 먼저, 그다음 확신도 높은 매수)
+        names = {c: q.name for c, q in quotes.items()}
+        names.update({c: h.name for c, h in held.items()})
+        self.j.remember_names(names)
+
         def note(d, outcome):
-            self.j.add_decision(run_id, d, outcome)
-            q = quotes.get(d.get("code"))
-            nm = q.name if q else d.get("code")
+            nm = names.get(d.get("code")) or self.j.names().get(d.get("code")) or d.get("code")
+            self.j.add_decision(run_id, d, outcome, nm if nm != d.get("code") else None)
             self.say(f"  · {d.get('action')} {nm} (확신 {float(d.get('confidence', 0)):.2f}) → {outcome}\n"
                      f"    └ {d.get('reason', '')}")
 
