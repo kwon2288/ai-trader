@@ -41,7 +41,7 @@
 </div>
 
 <div class="card">
-  <h2>보유 종목</h2>
+  <h2>봇 보유 종목</h2>
   {% if snap and snap.positions %}
   <div class="scroll"><table>
     <tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">수익률</th></tr>
@@ -53,6 +53,36 @@
   </table></div>
   <div class="mute">손절 {{ c.stop_loss_pct }}% · 익절 +{{ c.take_profit_pct }}% 자동 적용</div>
   {% else %}<div class="mute">봇이 보유한 종목이 없습니다.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>내 계좌 전체 <span class="mute" style="font-weight:normal;font-size:13px">— 참고용, 봇은 🤖 표시분만 매매</span></h2>
+  {% set a = snap.account if snap else None %}
+  {% if a %}
+  <div class="stats">
+    <div class="stat"><div class="k">주식 평가금액</div><div class="v">{{ money(a.value, c.currency) }}</div></div>
+    <div class="stat"><div class="k">평가 손익</div><div class="v">{{ pct(a.pnl_pct) }}</div>
+      <div class="mute">{{ ('+' if a.pnl >= 0 else '') ~ num(a.pnl, c.currency) }}</div></div>
+    <div class="stat"><div class="k">주문가능 현금</div><div class="v">{% if a.cash is not none %}{{ money(a.cash, c.currency) }}{% else %}-{% endif %}</div></div>
+    <div class="stat"><div class="k">보유 종목</div><div class="v">{{ a.holdings|length }}</div></div>
+  </div>
+  {% if a.holdings %}
+  <div class="scroll"><table>
+    <tr><th>종목</th><th class="r">평가금액</th><th class="r">수익률</th></tr>
+    {% for p in a.holdings %}
+    <tr><td>{{ p.name }}<div class="mute">{{ p.code }}</div>{% if p.bot_qty %}<div class="mute">🤖 봇 {{ p.bot_qty }}주</div>{% endif %}</td>
+      <td class="r nw">{{ num(p.value, c.currency) }}
+        <div class="mute">{{ p.qty }}주 · 평단 {{ num(p.avg_price, c.currency) }}</div>
+        <div class="mute">현재 {{ num(p.now_price, c.currency) }}</div></td>
+      <td class="r nw">{{ pct(p.pnl_pct) }}<div class="mute">{{ ('+' if p.pnl >= 0 else '') ~ num(p.pnl, c.currency) }}</div></td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+  <div class="mute" style="margin-top:6px">증권사 잔고 기준 · {{ snap.ts[5:16].replace('T',' ') }}
+    {% if market == 'us' %}· 주문가능 현금은 원화 증거금이면 달러로 환산한 값{% endif %}</div>
+  {% else %}
+  <div class="mute">아래 ‘↻ 잔고 새로고침’을 누르면 계좌의 모든 보유 종목을 보여 줘요.</div>
+  {% endif %}
 </div>
 
 <div class="card">

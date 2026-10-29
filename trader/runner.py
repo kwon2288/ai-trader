@@ -101,7 +101,7 @@ def refresh_balance(cfg: Config, market: str = "kr") -> dict:
     j = Journal(cfg.db_path)
     broker = make_broker(cfg)
     bal = broker.balance()
-    from .bot import Bot, own_holdings
+    from .bot import Bot, account_view, own_holdings
     held = own_holdings(j, cfg, bal.holdings)
     Bot(cfg, broker, None, j)._sync_budget()            # 웹에서 바꾼 원금 반영
     cash = float(j.get(f"bot_cash_{cfg.ledger}") or cfg.total_krw)
@@ -113,6 +113,7 @@ def refresh_balance(cfg: Config, market: str = "kr") -> dict:
         "account_cash": bal.orderable_cash if bal.orderable_cash != float("inf") else None,
         "positions": [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
                        "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()],
+        "account": account_view(bal, held),
     }
     j.save_snapshot(cfg.ledger, snap)
     return snap

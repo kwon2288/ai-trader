@@ -29,6 +29,21 @@ def own_holdings(j: Journal, cfg: Config, holdings: dict, say=None) -> dict:
     return held
 
 
+def account_view(bal, held: dict) -> dict:
+    """웹 ‘내 계좌 전체’ 용 — 봇 몫과 사용자 보유를 모두 보여 준다 (조회만, 매매와 무관)."""
+    rows, value, cost = [], 0.0, 0.0
+    for c, h in sorted(bal.holdings.items(), key=lambda kv: -kv[1].qty * kv[1].now_price):
+        v, k = h.qty * h.now_price, h.qty * h.avg_price
+        value, cost = value + v, cost + k
+        rows.append({"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price, "now_price": h.now_price,
+                     "value": round(v, 2), "pnl": round(v - k, 2), "pnl_pct": round(h.pnl_pct, 2),
+                     "bot_qty": held[c].qty if c in held else 0})
+    cash = bal.orderable_cash if bal.orderable_cash != float("inf") else None
+    return {"holdings": rows, "value": round(value, 2), "cost": round(cost, 2),
+            "pnl": round(value - cost, 2), "pnl_pct": round((value / cost - 1) * 100, 2) if cost else 0.0,
+            "cash": cash}
+
+
 class Bot:
     def __init__(self, cfg: Config, broker, analyst, journal: Journal | None = None):
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
@@ -176,6 +191,7 @@ class Bot:
             "equity": equity, "cash": self.bot_cash, "pnl_pct": round(dd, 2),
             "positions": [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
                            "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()],
+            "account": account_view(bal, held),
         })
         if dd <= cfg.max_drawdown_pct:
             self.j.set(f"halted_{cfg.ledger}", "1")
