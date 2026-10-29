@@ -60,7 +60,9 @@ def aitest(cfg) -> None:
 
 
 def main() -> None:
+    from trader import __version__
     p = argparse.ArgumentParser(description="AI 자동매매")
+    p.add_argument("--version", action="version", version=f"ai-trader {__version__}")
     p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume"])
     p.add_argument("--force", action="store_true", help="장 상태 확인 무시 (테스트용)")
     p.add_argument("--market", choices=["kr", "us"], default="kr", help="kr=국내(기본), us=미국")

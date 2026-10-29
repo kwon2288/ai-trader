@@ -72,6 +72,7 @@ details summary{cursor:pointer;color:var(--mute)}
 {% with msgs = get_flashed_messages(with_categories=true) %}{% for cat, m in msgs %}
 <div class="flash {{ cat }}">{{ m }}</div>{% endfor %}{% endwith %}
 {% block body %}{% endblock %}
+<div class="mute" style="text-align:center;margin:18px 0 8px;font-size:12px">ai-trader v{{ app_version }}</div>
 </main>
 </body>
 </html>
