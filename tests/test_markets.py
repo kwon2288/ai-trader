@@ -102,6 +102,8 @@ def test_nh_us_broker_fields_and_routing():
         return {"Output_0": {"orr_no": 777}, "rsp_msg": "정상"}
 
     nhplug.call = call
+    b0 = NHUSBroker("mock", margin_currency="krw")
+    assert b0.balance().orderable_cash == 1000.0                 # 시세 조회 전이라도 환율을 받아 환산
     b = NHUSBroker("mock", margin_currency="krw")
     q = b.quote("AAPL")
     assert (q.price, q.ask, q.market_status, b.fx) == (231.4, 231.45, "1", 1400.0)

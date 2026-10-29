@@ -75,6 +75,16 @@ class NHUSBroker(NHBroker):
         return bars[-n:]
 
     # ── 계좌 ──
+    def _ensure_fx(self) -> float:
+        """원화 증거금 금액을 달러로 바꾸려면 환율이 필요하다 → 아직 모르면 대표 종목 시세로 한 번 받아온다."""
+        if not self.fx:
+            try:
+                o = self._post("/gbstock/quote/v1/current", {"iem_cd": "AAPL"}).get("Output_0") or {}
+                self.fx = _num(o.get("currency_prc"))
+            except Exception:  # noqa: BLE001
+                pass
+        return self.fx
+
     def _buyable(self, pcs: str, code: str = "", price: float = 0) -> dict:
         return self._post("/gbstock/inquiry/v1/buyableAmount", {
             "act_no": self.account, "pcs_dit": pcs, "fc_sec_trd_nat_cd": NATION_US, "iem_cd": code,
@@ -102,7 +112,7 @@ class NHUSBroker(NHBroker):
             o = self._buyable("1")
             amt = _num(o.get("orr_pbl_amt"))
             if (o.get("wtm_cur_cd") or "USD").strip().upper() == "KRW":
-                cash = amt / self.fx if self.fx else 0.0
+                cash = amt / self._ensure_fx() if self._ensure_fx() else 0.0
             else:
                 cash = amt
         except Exception:  # noqa: BLE001
