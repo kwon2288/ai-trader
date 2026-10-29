@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}적용 중 · AI 자동매매{% endblock %}
+{% block body %}
+<div class="card">
+  <h2>저장했습니다 ✅</h2>
+  <p>바뀐 항목: <b>{{ names }}</b></p>
+  <p class="mute" id="st">새 설정을 읽도록 웹 화면을 다시 시작하는 중이에요… (10초 정도)</p>
+  <p class="mute">이전 내용은 서버의 <code>.env.bak</code> 에 백업했어요. 다음 자동 실행부터 새 값을 씁니다.</p>
+  <a class="btn" href="{{ url_for('settings') }}">설정으로 돌아가기</a>
+</div>
+<script>
+// 재시작이 끝나면 설정 화면으로
+(function () {
+  var tries = 0, down = false;
+  var t = setInterval(async function () {
+    tries++;
+    try {
+      var r = await fetch('{{ url_for("login") }}', {cache: 'no-store'});
+      if (r.ok && (down || tries > 4)) { clearInterval(t); location.href = '{{ url_for("settings") }}#env'; }
+    } catch (e) { down = true; }
+    if (tries > 30) { clearInterval(t); document.getElementById('st').textContent = '자동으로 넘어가지 않으면 새로고침 해 주세요.'; }
+  }, 1500);
+})();
+</script>
+{% endblock %}

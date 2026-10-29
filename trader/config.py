@@ -19,7 +19,10 @@ def _load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        v = v.strip()
+        if v[:1] not in ('"', "'"):
+            v = v.split(" #", 1)[0].strip()        # 줄 끝 주석 (KEY=값   # 설명) 제거
+        os.environ.setdefault(k.strip(), v.strip('"').strip("'"))
 
 
 @dataclass

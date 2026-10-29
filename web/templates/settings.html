@@ -139,12 +139,56 @@
   </div>
 </div>
 
-<div class="card">
-  <h2>서버에서만 바꿀 수 있는 항목</h2>
-  <div class="mute">
-    앱키 · 계좌번호 · AI API 키는 보안상 웹에서 바꿀 수 없습니다.<br>
-    서버의 <code>/opt/ai-trader/.env</code> 를 수정한 뒤 <code>systemctl restart ai-trader-web</code> 하세요.
-  </div>
+<div class="card" id="env">
+  <h2>연결 정보 — 앱키 · 계좌 · AI 키</h2>
+  {% if web_env %}
+  <form method="post" action="{{ url_for('change_env') }}" id="envform" autocomplete="off">
+    <div class="mute">넣은 값은 보안상 다시 보여 주지 않아요. <b>빈칸은 그대로 둡니다</b> — 바꿀 칸만 입력하세요.</div>
+    {% for g in env_groups %}
+    <details {{ 'open' if g.id in ('broker', 'nh', 'ai') }} style="margin-top:12px">
+      <summary><b>{{ g.title }}</b></summary>
+      <div class="grid2">
+      {% for r in g.rows %}
+        <div><label for="env_{{ r.key }}">{{ r.label }}
+          {% if r.kind != 'choice' %}<span class="mute">· {{ r.shown or '비어 있음' }}</span>{% endif %}</label>
+        {% if r.kind == 'choice' %}
+          <select id="env_{{ r.key }}" name="{{ r.key }}">
+          {% for v, t in r.options %}<option value="{{ v }}" {{ 'selected' if r.value == v }}>{{ t }}</option>{% endfor %}
+          </select>
+        {% else %}
+          <input id="env_{{ r.key }}" name="{{ r.key }}" {{ 'type=password' if r.kind == 'secret' }}
+                 autocomplete="new-password" spellcheck="false"
+                 placeholder="{{ '바꿀 때만 입력' if r.set else '입력' }}">
+          {% if r.set %}<label style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px">
+            <input type="checkbox" name="clear_{{ r.key }}" style="width:auto"> 지우기</label>{% endif %}
+        {% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+    <details style="margin-top:12px">
+      <summary><b>웹 비밀번호 바꾸기</b></summary>
+      <div class="grid2">
+        <div><label for="new_password">새 비밀번호 (8자 이상)</label>
+          <input id="new_password" name="new_password" type="password" autocomplete="new-password"></div>
+        <div><label for="new_password2">새 비밀번호 확인</label>
+          <input id="new_password2" name="new_password2" type="password" autocomplete="new-password"></div>
+      </div>
+    </details>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line,#ddd)">
+      <label for="current_password">저장하려면 지금 웹 비밀번호 입력</label>
+      <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+      <div class="row" style="margin-top:10px"><button class="btn pri">연결 정보 저장</button></div>
+      <div class="mute" style="margin-top:6px">저장하면 서버의 <code>.env</code> 를 고치고(이전 내용은 <code>.env.bak</code>),
+        웹 화면이 10초쯤 다시 시작돼요. 실행 중일 때는 저장되지 않아요.</div>
+    </div>
+  </form>
+  {% else %}
+  <div class="mute">웹에서 연결 정보 변경이 꺼져 있어요 (<code>.env</code> 의 <code>WEB_ENV_EDIT=off</code>).
+    서버의 <code>/opt/ai-trader/.env</code> 를 직접 고친 뒤 <code>systemctl restart ai-trader-web</code> 하세요.</div>
+  {% endif %}
+  <div class="mute" style="margin-top:8px">웹에서 바꿀 수 없는 것: <code>I_UNDERSTAND_REAL_MONEY</code> · <code>WEB_LIVE_SWITCH</code> · <code>WEB_ENV_EDIT</code> · 포트 (서버에서만)</div>
 </div>
 <script>
 // 실계좌를 고르면 확인 칸을 보여준다

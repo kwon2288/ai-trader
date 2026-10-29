@@ -63,10 +63,25 @@ def main() -> None:
     from trader import __version__
     p = argparse.ArgumentParser(description="AI 자동매매")
     p.add_argument("--version", action="version", version=f"ai-trader {__version__}")
-    p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume"])
+    p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume",
+                                      "passwd"])
     p.add_argument("--force", action="store_true", help="장 상태 확인 무시 (테스트용)")
     p.add_argument("--market", choices=["kr", "us"], default="kr", help="kr=국내(기본), us=미국")
     args = p.parse_args()
+
+    if args.cmd == "passwd":                         # 웹 비밀번호 설정 (.env 가 없으면 예시에서 만든다)
+        import getpass
+        from trader import envfile
+        envfile.ensure()
+        pw = getpass.getpass("새 웹 비밀번호 (8자 이상): ")
+        if len(pw) < 8 or pw != getpass.getpass("한 번 더: "):
+            sys.exit("8자 이상이어야 하고 두 번 같아야 합니다.")
+        if envfile.check_value(pw) or " #" in pw:
+            sys.exit("따옴표·역슬래시·' #' 은 쓸 수 없습니다.")
+        envfile.update({"WEB_PASSWORD": pw})
+        print("✅ 저장했습니다. 웹 화면: sudo systemctl restart ai-trader-web\n"
+              "   나머지(앱키·AI 키)는 웹 → 설정 → 연결 정보에서 넣을 수 있어요.")
+        return
 
     cfg = config.load()
     setup_logging(cfg)

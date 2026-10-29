@@ -3,7 +3,9 @@
   .venv/bin/python -m web.app          # http://<LXC IP>:8080
   .env 의 WEB_PASSWORD 로 로그인합니다.
 
-보안상 웹에서 할 수 없는 일: 앱키·계좌번호 변경 (서버의 .env 에서만).
+앱키·계좌·AI 키도 웹(설정 → 연결 정보)에서 넣을 수 있다. 값은 화면에 다시 보여 주지 않고,
+저장할 때 웹 비밀번호를 다시 묻고, .env 를 백업(.env.bak)한 뒤 웹을 자동 재시작한다.
+(.env 에 WEB_ENV_EDIT=off 면 웹에서 못 바꿈. 안전장치 키들은 웹에서 절대 못 바꿈)
 실계좌 전환은 웹에서 가능하지만 비밀번호 재입력 + 확인 문구 + 연결 확인을 거친다
 (.env 에 WEB_LIVE_SWITCH=off 면 웹에서 실계좌로 못 바꿈).
 """
@@ -249,6 +251,7 @@ def settings():
     us_broker = broker_name(cfg().for_market("us"))
     from trader.analyst import PROVIDERS, available
     return render_template("settings.html", c=cfg(), fields=fields,
+                           env_groups=_env_view(), web_env=_web_env_edit(),
                            mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
                            env_mode=os.environ.get("TRADING_MODE", "dry").strip().lower(), raw=raw, auto_fields=auto_fields,
                            us_fields=us_fields, us=us_raw, us_broker=us_broker,
@@ -339,6 +342,139 @@ def change_mode():
     return redirect(url_for("settings"))
 
 
+# ── 연결 정보 (.env) ─────────────────────────────────────
+# (키, 이름, 종류) 종류: secret=값 숨김 · id=끝 4자리만 · plain=그대로
+ENV_GROUPS = [
+    ("증권사 선택", "broker", [
+        ("BROKER", "국내 주식 증권사", "choice:nh=NH 나무증권,kis=한국투자증권,toss=토스증권"),
+        ("BROKER_US", "미국 주식 증권사", "choice:=국내와 같게 (kis면 NH),nh=NH 나무증권,toss=토스증권"),
+    ]),
+    ("NH 나무증권 (nhplug.com)", "nh", [
+        ("NHPLUG_APP_KEY", "앱키 (App Key)", "id"),
+        ("NHPLUG_APP_SECRET", "앱 시크릿 (App Secret)", "secret"),
+        ("NHPLUG_ACCOUNT", "계좌번호 — 여러 개일 때만", "id"),
+        ("NHPLUG_ACCOUNT_US", "미국 주식 계좌 — 다를 때만", "id"),
+    ]),
+    ("AI API 키 — 쓸 것만", "ai", [
+        ("GEMINI_API_KEY", "Gemini (aistudio.google.com)", "secret"),
+        ("ANTHROPIC_API_KEY", "Claude (console.anthropic.com)", "secret"),
+        ("OPENAI_API_KEY", "ChatGPT (platform.openai.com)", "secret"),
+    ]),
+    ("한국투자증권 (선택)", "kis", [
+        ("KIS_APP_KEY", "모의투자 앱키", "id"),
+        ("KIS_APP_SECRET", "모의투자 앱 시크릿", "secret"),
+        ("KIS_ACCOUNT", "모의투자 계좌 (12345678-01)", "id"),
+        ("KIS_LIVE_APP_KEY", "실전 앱키", "id"),
+        ("KIS_LIVE_APP_SECRET", "실전 앱 시크릿", "secret"),
+        ("KIS_LIVE_ACCOUNT", "실전 계좌", "id"),
+    ]),
+    ("토스증권 (선택)", "toss", [
+        ("TOSS_CLIENT_ID", "Client ID", "id"),
+        ("TOSS_CLIENT_SECRET", "Client Secret", "secret"),
+        ("TOSS_ACCOUNT_SEQ", "accountSeq — 여러 계좌일 때만", "plain"),
+    ]),
+]
+ENV_KEYS = {k: kind for _t, _g, items in ENV_GROUPS for k, _l, kind in items}
+
+
+def _web_env_edit() -> bool:
+    return os.environ.get("WEB_ENV_EDIT", "on").strip().lower() not in ("off", "no", "0", "false")
+
+
+def _env_view() -> list:
+    from trader import envfile
+    cur = envfile.read()
+    groups = []
+    for title, gid, items in ENV_GROUPS:
+        rows = []
+        for k, label, kind in items:
+            v = cur.get(k, "")
+            if kind.startswith("choice:"):
+                opts = [tuple(o.split("=", 1)) for o in kind[7:].split(",")]
+                rows.append({"key": k, "label": label, "kind": "choice", "value": v, "options": opts})
+                continue
+            shown = ("" if not v else "설정됨 ✅" if kind == "secret"
+                     else ("•••• " + v[-4:]) if kind == "id" and len(v) > 4 else v)
+            rows.append({"key": k, "label": label, "kind": kind, "set": bool(v), "shown": shown})
+        groups.append({"title": title, "id": gid, "rows": rows})
+    return groups
+
+
+def _restart_soon():
+    """systemd 가 다시 띄우도록 잠시 뒤 종료 → 바뀐 .env 를 웹·증권사 모듈 모두 새로 읽는다."""
+    if app.config.get("TESTING"):
+        return
+    threading.Timer(1.5, lambda: os._exit(3)).start()
+
+
+@app.post("/env")
+@login_required
+def change_env():
+    from trader import envfile
+    c = cfg()
+    if not _web_env_edit():
+        flash("웹에서 연결 정보 변경이 꺼져 있습니다 (.env 의 WEB_ENV_EDIT=off).", "err")
+        return redirect(url_for("settings"))
+    pw = os.environ.get("WEB_PASSWORD", "")
+    if not (pw and hmac.compare_digest(request.form.get("current_password", ""), pw)):
+        time.sleep(1.0)
+        flash("현재 웹 비밀번호가 맞지 않아 저장하지 않았습니다.", "err")
+        return redirect(url_for("settings") + "#env")
+    if _busy(c):
+        flash("실행 중에는 저장할 수 없습니다. 끝난 뒤 다시 시도하세요.", "err")
+        return redirect(url_for("settings") + "#env")
+    changes, errs = {}, []
+    cur = envfile.read()
+    for k, kind in ENV_KEYS.items():
+        if request.form.get(f"clear_{k}"):
+            if k in cur:
+                changes[k] = None
+            continue
+        v = (request.form.get(k) or "").strip()
+        if kind.startswith("choice:"):
+            allowed = [o.split("=", 1)[0] for o in kind[7:].split(",")]
+            if v not in allowed:
+                errs.append(f"{k}: 고를 수 없는 값")
+            elif v != cur.get(k, ""):
+                changes[k] = v or None
+            continue
+        if not v:                                    # 빈칸 = 그대로 둠
+            continue
+        e = envfile.check_value(v)
+        if e:
+            errs.append(f"{k}: {e}")
+        elif v != cur.get(k):
+            changes[k] = v
+    new_pw = request.form.get("new_password", "")
+    if new_pw:
+        if len(new_pw) < 8:
+            errs.append("새 웹 비밀번호는 8자 이상이어야 합니다")
+        elif new_pw != request.form.get("new_password2", ""):
+            errs.append("새 웹 비밀번호 두 칸이 다릅니다")
+        elif envfile.check_value(new_pw) or " #" in new_pw:
+            errs.append("새 웹 비밀번호에 따옴표·역슬래시·' #' 은 쓸 수 없습니다")
+        else:
+            changes["WEB_PASSWORD"] = new_pw
+    if errs:
+        for e in errs:
+            flash(e, "err")
+        flash("아무것도 저장하지 않았습니다.", "err")
+        return redirect(url_for("settings") + "#env")
+    if not changes:
+        flash("바뀐 값이 없습니다.", "ok")
+        return redirect(url_for("settings") + "#env")
+    envfile.update(changes)
+    for k, v in changes.items():                 # 지금 프로세스에도 바로 반영
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    names = ", ".join(sorted("웹 비밀번호" if k == "WEB_PASSWORD" else k for k in changes))
+    Journal(c.db_path).add_log(c.ledger, "env", "web", f"연결 정보 변경: {names}")
+    _restart_soon()
+    return render_template("restarting.html", names=names)
+
+
 # ── 동작 ───────────────────────────────────────────────
 @app.post("/action/<name>")
 @login_required
@@ -379,7 +515,7 @@ def api_status():
 
 def main():
     if not os.environ.get("WEB_PASSWORD") or len(os.environ["WEB_PASSWORD"]) < 8:
-        sys.exit(".env 에 WEB_PASSWORD 를 8자 이상으로 설정하세요.")
+        sys.exit("웹 비밀번호가 없습니다 → .venv/bin/python run.py passwd  (또는 .env 에 WEB_PASSWORD 를 8자 이상)")
     host = os.environ.get("WEB_HOST", "0.0.0.0")
     port = int(os.environ.get("WEB_PORT", "8080"))
     from waitress import serve

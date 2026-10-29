@@ -101,20 +101,18 @@ sudo git clone https://github.com/kwon2288/ai-trader /opt/ai-trader
 cd /opt/ai-trader
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env && chmod 600 .env
-nano .env
+.venv/bin/python run.py passwd     # 웹 비밀번호 정하기 (.env 를 자동으로 만듦)
 ```
 
-`.env`에 최소한 아래 값을 넣습니다.
+나머지는 **웹 화면(5단계)을 띄운 뒤 설정 → 연결 정보** 에서 넣으면 됩니다.
 
-```ini
-TRADING_MODE=dry                 # 처음엔 반드시 dry
-NHPLUG_APP_KEY=...
-NHPLUG_APP_SECRET=...
-NHPLUG_BASE_URL=https://moapi.nhplug.com:8443   # 모의투자 서버
-GEMINI_API_KEY=...               # 쓸 AI 키 (하나 이상)
-WEB_PASSWORD=8자이상비밀번호
-```
+| 항목 | 넣을 곳 |
+|---|---|
+| NH 앱키 · 앱 시크릿 (필수) | 설정 → 연결 정보 → NH 나무증권 |
+| AI 키 (하나 이상, 무료는 Gemini) | 설정 → 연결 정보 → AI API 키 |
+| 실행 모드 (처음엔 드라이런) | 설정 → 실행 모드 |
+
+웹 없이 하려면 `nano .env` 로 직접 넣어도 됩니다 (`NHPLUG_APP_KEY`, `NHPLUG_APP_SECRET`, `GEMINI_API_KEY`, `TRADING_MODE=dry`).
 
 > LXC에서 한글이 깨지면: `apt install -y locales && locale-gen ko_KR.UTF-8 en_US.UTF-8 && update-locale LANG=en_US.UTF-8` 후 재접속
 
@@ -128,7 +126,7 @@ WEB_PASSWORD=8자이상비밀번호
 .venv/bin/python run.py trade      # ④ dry 모드로 전체 흐름 확인 (주문 안 냄)
 ```
 
-①~④가 모두 괜찮으면 `.env`에서 `TRADING_MODE=mock`으로 바꿔 모의투자 주문을 시작합니다.
+①~④가 모두 괜찮으면 웹 **설정 → 실행 모드** 에서 모의투자로 바꿔 주문을 시작합니다.
 
 **권장 일정:** dry 며칠 → mock 최소 4주 → 결과가 납득될 때만 live
 
@@ -152,17 +150,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ai-trader-web
 ```
 
-브라우저에서 `http://<서버 IP>:8080` 접속 → `WEB_PASSWORD`로 로그인.
+브라우저에서 `http://<서버 IP>:8080` 접속 → `run.py passwd` 로 정한 비밀번호로 로그인.
 
 | 화면 | 할 수 있는 것 |
 |---|---|
 | 현황 | 봇 자산·수익률·자산 추이, 보유 종목, 오늘의 분석 대상(자동 선정 목록), 최근 AI 판단과 근거, 지금 분석/매매 실행, 종목 다시 찾기, 잔고 새로고침, 정지/재개 |
 | 기록 | 주문 내역, AI 판단 기록, 실행 로그(자동·웹·명령줄 구분) |
-| 설정 | AI 선택·모델(드롭다운, 목록에 없으면 '직접 입력'), 예산·손절/익절·확신도·최소 보유일·종목 목록 (다음 실행부터 적용) |
+| 설정 | AI 선택·모델(드롭다운, 목록에 없으면 '직접 입력'), 예산·손절/익절·확신도·최소 보유일·종목 목록, 미국 주식, **실행 모드**, **연결 정보(앱키·계좌·AI 키·웹 비밀번호)** (다음 실행부터 적용) |
 
 <p align="center"><img src="docs/screenshot-settings.png" width="420" alt="설정 화면"></p>
 
-- 실행 모드, 앱키, AI 키, 실계좌 전환은 보안상 **웹에서 바꿀 수 없습니다.** 서버의 `.env`를 고친 뒤 `sudo systemctl restart ai-trader-web` 하세요.
+- **연결 정보** 는 저장할 때 웹 비밀번호를 다시 묻고, 넣은 값은 화면에 다시 보여 주지 않습니다(앱키는 끝 4자리만).
+  빈칸은 그대로 두고, `.env` 는 `.env.bak` 으로 백업한 뒤 웹이 자동으로 다시 시작됩니다(10초).
+- 웹에서 못 바꾸는 것: `I_UNDERSTAND_REAL_MONEY`, `WEB_LIVE_SWITCH`, `WEB_ENV_EDIT`, 포트. 연결 정보 변경 자체를 막으려면 `.env` 에 `WEB_ENV_EDIT=off`.
 - `.env`에 `AI_PROVIDER`를 넣으면 웹 설정보다 우선합니다. 웹에서 관리하려면 넣지 마세요.
 - **공유기 포트포워딩으로 인터넷에 직접 열지 마세요.** 집 밖에서 쓰려면 Tailscale이나 Cloudflare Tunnel + Access 뒤에 두세요.
 
@@ -178,9 +178,11 @@ sudo systemctl enable --now ai-trader-web
 | `run.py scan` | 자동 선정 종목 지금 다시 찾기 (평소엔 그날 첫 실행 때 자동) |
 | `run.py aitest` | 키가 있는 AI마다 짧은 테스트 질의 (시세·주문 없음) |
 | `run.py analyze` | AI 판단만 보기 — 주문 없음, 장외 시간에도 가능 |
-| `run.py trade` | 매매 사이클 1회 — `TRADING_MODE`에 따라 동작, 정규장에만 주문 |
+| `run.py trade` | 매매 사이클 1회 — 실행 모드(웹 설정 또는 `TRADING_MODE`)에 따라 동작, 정규장에만 주문 |
 | `run.py report` | 최근 30일 주문 내역 |
 | `run.py stop` / `resume` | 킬스위치 켜기 / 정지 해제(손실 한도 정지 포함) |
+| `run.py passwd` | 웹 비밀번호 정하기/바꾸기 (`.env` 가 없으면 만듦) |
+| `run.py --version` | 버전 확인 |
 
 ## 설정
 
