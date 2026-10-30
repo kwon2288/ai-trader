@@ -1,0 +1,39 @@
+<script>
+// WebAuthn 헬퍼: 서버 JSON(base64url) ↔ 브라우저 ArrayBuffer
+var PK = (function () {
+  function b2a(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '=';
+    var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; }
+  function a2b(buf) { var u = new Uint8Array(buf), s = ''; for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+  function supported() { return !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext); }
+  async function post(url, body) {
+    var r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+    var d = {}; try { d = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error(d.error || ('오류 ' + r.status));
+    return d;
+  }
+  async function register(optUrl, verifyUrl, password, name) {
+    var o = await post(optUrl, {password: password});
+    o.challenge = b2a(o.challenge); o.user.id = b2a(o.user.id);
+    (o.excludeCredentials || []).forEach(function (c) { c.id = b2a(c.id); });
+    var c = await navigator.credentials.create({publicKey: o});
+    return post(verifyUrl, {name: name, credential: {id: c.id, rawId: a2b(c.rawId), type: c.type,
+      response: {clientDataJSON: a2b(c.response.clientDataJSON), attestationObject: a2b(c.response.attestationObject),
+                 transports: c.response.getTransports ? c.response.getTransports() : []},
+      clientExtensionResults: {}}});
+  }
+  async function login(optUrl, verifyUrl) {
+    var r = await fetch(optUrl, {cache: 'no-store'}); var o = await r.json();
+    if (!r.ok) throw new Error(o.error || '오류');
+    o.challenge = b2a(o.challenge);
+    (o.allowCredentials || []).forEach(function (c) { c.id = b2a(c.id); });
+    var c = await navigator.credentials.get({publicKey: o});
+    return post(verifyUrl, {credential: {id: c.id, rawId: a2b(c.rawId), type: c.type,
+      response: {clientDataJSON: a2b(c.response.clientDataJSON), authenticatorData: a2b(c.response.authenticatorData),
+                 signature: a2b(c.response.signature), userHandle: c.response.userHandle ? a2b(c.response.userHandle) : null},
+      clientExtensionResults: {}}});
+  }
+  function why(e) { return (e && e.name === 'NotAllowedError') ? '취소됐거나 시간이 지났어요.' : (e && e.message) || String(e); }
+  return {supported: supported, register: register, login: login, why: why};
+})();
+</script>

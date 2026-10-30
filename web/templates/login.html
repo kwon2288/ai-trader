@@ -2,9 +2,32 @@
 {% block body %}
 <div class="card" style="max-width:360px;margin:40px auto">
   <h2>로그인</h2>
+  {% if has_passkeys %}
+  <button class="btn pri" id="pkbtn" style="width:100%;display:none" type="button">🔐 Face ID로 로그인</button>
+  <div class="mute" id="pkmsg" style="margin:8px 0 4px;min-height:1em"></div>
+  {% endif %}
   <form method="post">
-    <input type="password" name="password" placeholder="비밀번호" autofocus autocomplete="current-password">
-    <div style="margin-top:12px"><button class="btn pri" style="width:100%">들어가기</button></div>
+    {# 아이폰 키체인이 비밀번호를 저장·자동완성(Face ID)하도록 사용자 이름 칸을 숨겨서 둔다 #}
+    <input type="text" name="username" value="ai-trader" autocomplete="username" style="display:none" readonly>
+    <input type="password" name="password" placeholder="비밀번호" {{ '' if has_passkeys else 'autofocus' }} autocomplete="current-password">
+    <div style="margin-top:12px"><button class="btn {{ '' if has_passkeys else 'pri' }}" style="width:100%">비밀번호로 들어가기</button></div>
   </form>
 </div>
+{% if has_passkeys %}
+{% include "_webauthn.html" %}
+<script>
+(function () {
+  var b = document.getElementById('pkbtn'), m = document.getElementById('pkmsg');
+  if (!PK.supported()) { m.textContent = window.isSecureContext ? '' : 'Face ID 로그인은 https 주소에서만 돼요.'; return; }
+  b.style.display = 'block';
+  b.addEventListener('click', async function () {
+    b.disabled = true; m.textContent = '';
+    try {
+      var d = await PK.login('{{ url_for("passkey_login_options") }}', '{{ url_for("passkey_login_verify") }}');
+      location.href = {{ (request.args.get('next') or '/')|tojson }}.startsWith('/') ? {{ (request.args.get('next') or '/')|tojson }} : '/';
+    } catch (e) { m.textContent = PK.why(e); b.disabled = false; }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -4,3 +4,4 @@ anthropic>=0.40    # Claude
 # 웹 관리 화면
 flask>=3.0
 waitress>=3.0
+webauthn>=2.5      # Face ID / Touch ID(패스키) 로그인

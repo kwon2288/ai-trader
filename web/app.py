@@ -123,7 +123,8 @@ def login():
             return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
         time.sleep(1.5)  # 무차별 대입 지연
         flash("비밀번호가 틀렸습니다.", "err")
-    return render_template("login.html")
+    from web import passkeys
+    return render_template("login.html", has_passkeys=bool(passkeys.load(cfg().data_dir)))
 
 
 @app.post("/logout")
@@ -254,6 +255,7 @@ def settings():
                            env_groups=_env_view(), web_env=_web_env_edit(),
                            upd=__import__("trader.updater", fromlist=["x"]).last_check(cfg().data_dir),
                            web_update=_web_update(),
+                           passkey_list=__import__("web.passkeys", fromlist=["x"]).load(cfg().data_dir),
                            acct_choice=session.get("acct_choice"),
                            mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
                            env_mode=os.environ.get("TRADING_MODE", "dry").strip().lower(), raw=raw, auto_fields=auto_fields,
@@ -511,6 +513,100 @@ def change_env():
     Journal(c.db_path).add_log(c.ledger, "env", "web", f"연결 정보 변경: {names}")
     _restart_soon()
     return render_template("restarting.html", names=names)
+
+
+# ── 패스키 (Face ID / Touch ID) ─────────────────────────
+def _pk_ctx():
+    from web import passkeys
+    return passkeys.rp_and_origin(request.host, request.headers.get("Origin"))
+
+
+def _json_err(msg: str, code: int = 400):
+    return jsonify(error=msg), code
+
+
+def _pw_ok(pw_in: str) -> bool:
+    pw = os.environ.get("WEB_PASSWORD", "")
+    return bool(pw) and hmac.compare_digest(pw_in or "", pw)
+
+
+@app.get("/passkey/login/options")
+def passkey_login_options():
+    from web import passkeys
+    try:
+        opts, chal = passkeys.login_options(passkeys.rp_id_for(request.host))
+    except Exception as e:  # noqa: BLE001
+        return _json_err(str(e))
+    session["pk_chal"] = chal
+    return app.response_class(opts, mimetype="application/json")
+
+
+@app.post("/passkey/login/verify")
+def passkey_login_verify():
+    from web import passkeys
+    chal = session.pop("pk_chal", None)
+    if not chal:
+        return _json_err("다시 시도하세요 (만료)")
+    try:
+        rp_id, origin = _pk_ctx()
+        passkeys.login_verify(cfg().data_dir, (request.get_json(silent=True) or {}).get("credential") or {},
+                              chal, rp_id, origin)
+    except Exception as e:  # noqa: BLE001
+        time.sleep(1.0)
+        return _json_err(f"Face ID 로그인 실패: {e}", 403)
+    session.clear()
+    session["ok"] = True
+    session.permanent = True
+    return jsonify(ok=True)
+
+
+@app.post("/passkey/register/options")
+@login_required
+def passkey_register_options():
+    from web import passkeys
+    if not _pw_ok((request.get_json(silent=True) or {}).get("password", "")):
+        time.sleep(1.0)
+        return _json_err("웹 비밀번호가 맞지 않습니다", 403)
+    try:
+        rp_id, _origin = _pk_ctx()
+        opts, chal = passkeys.register_options(cfg().data_dir, rp_id)
+    except Exception as e:  # noqa: BLE001
+        return _json_err(str(e))
+    session["pk_reg_chal"] = chal
+    return app.response_class(opts, mimetype="application/json")
+
+
+@app.post("/passkey/register/verify")
+@login_required
+def passkey_register_verify():
+    from web import passkeys
+    chal = session.pop("pk_reg_chal", None)
+    if not chal:
+        return _json_err("다시 시도하세요 (만료)")
+    body = request.get_json(silent=True) or {}
+    try:
+        rp_id, origin = _pk_ctx()
+        item = passkeys.register_verify(cfg().data_dir, body.get("credential") or {}, chal, rp_id, origin,
+                                        str(body.get("name") or ""))
+    except Exception as e:  # noqa: BLE001
+        return _json_err(f"등록 실패: {e}")
+    c = cfg()
+    Journal(c.db_path).add_log(c.ledger, "passkey", "web", f"Face ID(패스키) 등록: {item['name']}")
+    return jsonify(ok=True, name=item["name"])
+
+
+@app.post("/passkey/delete")
+@login_required
+def passkey_delete():
+    from web import passkeys
+    if not _pw_ok(request.form.get("password", "")):
+        time.sleep(1.0)
+        flash("웹 비밀번호가 맞지 않습니다.", "err")
+    elif passkeys.remove(cfg().data_dir, request.form.get("id", "")):
+        c = cfg()
+        Journal(c.db_path).add_log(c.ledger, "passkey", "web", "Face ID(패스키) 삭제")
+        flash("삭제했습니다.", "ok")
+    return redirect(url_for("settings") + "#security")
 
 
 # ── 업데이트 (GitHub → 서버) ──────────────────────────────
