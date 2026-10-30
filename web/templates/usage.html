@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}AI 사용량 · AI 자동매매{% endblock %}
+{% block body %}
+{% macro usd(v) %}{% if v is none %}-{% elif v < 0.01 and v > 0 %}${{ "%.4f"|format(v) }}{% else %}${{ "%.2f"|format(v) }}{% endif %}{% endmacro %}
+{% macro krw(v) %}{% if v is not none %}<span class="mute">≈{{ "{:,.0f}".format(v * 1400) }}원</span>{% endif %}{% endmacro %}
+<div class="card">
+  <h2>AI 사용량 · 비용</h2>
+  <div class="pills">
+    {% for k, v in [('month','이번 달'),('30d','최근 30일'),('all','전체')] %}
+    <a href="{{ url_for('usage', p=k) }}" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="k">비용</div><div class="v">{{ usd(summ.cost) }}</div>{{ krw(summ.cost) }}</div>
+    <div class="stat"><div class="k">AI 호출</div><div class="v">{{ summ.calls }}회</div></div>
+    <div class="stat"><div class="k">입력 토큰</div><div class="v">{{ "{:,}".format(summ.tin) }}</div></div>
+    <div class="stat"><div class="k">출력 토큰</div><div class="v">{{ "{:,}".format(summ.tout) }}</div></div>
+  </div>
+  {% if summ.rows %}
+  <div class="scroll"><table>
+    <tr><th>모델</th><th class="r">호출</th><th class="r">입력 / 출력</th><th class="r">비용</th></tr>
+    {% for g in summ.rows %}
+    <tr><td>{{ g.model }}<div class="mute">{{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT'}[g.provider] }}{% if st.free.get(g.provider) %} · 무료 등급{% endif %}</div></td>
+      <td class="r">{{ g.calls }}</td>
+      <td class="r nw">{{ "{:,}".format(g.tin) }}<div class="mute">{{ "{:,}".format(g.tout) }}</div></td>
+      <td class="r nw">{{ usd(g.cost) }}{% if not g.known %}<div class="mute">단가 모름</div>{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="mute">아직 기록이 없어요. 이 버전부터 AI를 부를 때마다 쌓여요.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>${{ "%g"|format(st.budget) }} 충전하면 얼마나 쓸까</h2>
+  <div class="mute">최근 {{ days }}일 사용량으로 계산한 예상이에요. 기록이 쌓일수록 정확해져요.</div>
+  <div class="scroll" style="margin-top:8px"><table>
+    <tr><th>AI</th><th class="r">하루 평균</th><th class="r">한 달 예상</th><th class="r">${{ "%g"|format(st.budget) }}로</th></tr>
+    {% for prov, x in proj.items() %}{% if x.calls or x.has_key %}
+    <tr><td>{{ x.label }}{% if not x.has_key %}<div class="mute">키 없음</div>{% endif %}</td>
+      <td class="r nw">{{ usd(x.daily) }}</td>
+      <td class="r nw">{{ usd(x.monthly) }}<div>{{ krw(x.monthly) }}</div></td>
+      <td class="r nw">{% if x.free %}<b>무료</b>{% elif x.months is none %}<span class="mute">사용 기록 없음</span>
+        {% elif x.months >= 24 %}<b>{{ "%.0f"|format(x.months / 12) }}년+</b>{% elif x.months >= 1 %}<b>약 {{ "%.1f"|format(x.months) }}개월</b>
+        {% else %}<b>약 {{ "%.0f"|format(x.months * 30) }}일</b>{% endif %}
+        {% if x.unknown %}<div class="mute">단가 모르는 {{ x.unknown }}건 제외</div>{% endif %}</td></tr>
+    {% endif %}{% endfor %}
+  </table></div>
+  {% set tracked = proj.values()|selectattr('remaining', 'ne', none)|list %}
+  {% if tracked %}
+  <h2 style="margin-top:16px">충전 잔액 (추정)</h2>
+  <div class="scroll"><table>
+    <tr><th>AI</th><th class="r">충전</th><th class="r">쓴 돈</th><th class="r">남은 돈</th><th class="r">소진 예상</th></tr>
+    {% for prov, x in proj.items() %}{% if x.remaining is not none %}
+    <tr><td>{{ x.label }}<div class="mute">{{ x.credit.since }}부터</div></td>
+      <td class="r">{{ usd(x.credit.amount) }}</td><td class="r">{{ usd(x.used) }}</td>
+      <td class="r"><b>{{ usd(x.remaining) }}</b></td>
+      <td class="r nw">{% if x.empty_date %}{{ x.empty_date }}<div class="mute">약 {{ "%.0f"|format(x.left_days) }}일</div>{% else %}<span class="mute">충분</span>{% endif %}</td></tr>
+    {% endif %}{% endfor %}
+  </table></div>
+  <div class="mute">이 서버에서 부른 것만 계산한 추정치예요. 정확한 잔액은 각 콘솔에서 확인하세요.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>계산 설정</h2>
+  <form method="post" action="{{ url_for('usage_settings') }}">
+    <div class="grid2">
+      <div><label for="budget">‘얼마나 쓸까’ 기준 금액 ($)</label><input id="budget" name="budget" value="{{ '%g'|format(st.budget) }}" inputmode="decimal"></div>
+      <div><label style="display:flex;gap:8px;align-items:center;margin-top:26px;color:var(--fg)">
+        <input type="checkbox" name="free_gemini" style="width:auto" {{ 'checked' if st.free.get('gemini') }}> Gemini 무료 등급 사용 중 (비용 0)</label></div>
+    </div>
+    <h3 style="margin:14px 0 4px;font-size:14px">충전 기록 — 넣으면 남은 돈·소진 예상일을 보여 줘요</h3>
+    <div class="grid2">
+    {% for prov, x in proj.items() %}
+      <div><label>{{ x.label }} 충전액 ($) · 충전일</label>
+        <div class="row" style="gap:6px;flex-wrap:nowrap">
+          <input name="credit_{{ prov }}" value="{{ '%g'|format(x.credit.amount) if x.credit.amount else '' }}" placeholder="예: 5" inputmode="decimal" style="flex:1">
+          <input type="date" name="since_{{ prov }}" value="{{ x.credit.since or today.isoformat() }}" style="flex:1"></div></div>
+    {% endfor %}
+    </div>
+    <h3 style="margin:14px 0 4px;font-size:14px">모델 단가 (100만 토큰당 $, 입력 / 출력)</h3>
+    <div class="scroll"><table>
+      {% for m, pr, custom in models %}
+      <tr><td>{{ m }}{% if custom %} <span class="badge">직접 입력</span>{% endif %}</td>
+        <td><input name="pin_{{ m }}" value="{{ '%g'|format(pr[0]) if pr else '' }}" placeholder="입력" inputmode="decimal" style="width:80px"></td>
+        <td><input name="pout_{{ m }}" value="{{ '%g'|format(pr[1]) if pr else '' }}" placeholder="출력" inputmode="decimal" style="width:80px"></td></tr>
+      {% endfor %}
+    </table></div>
+    <div class="row" style="margin-top:10px"><button class="btn pri">저장</button></div>
+  </form>
+  <div class="mute" style="margin-top:8px">기본 단가는 2026년 10월 조사값이에요 (원화는 $1=1,400원으로 대략 환산). 가격이 바뀌면 여기서 고치세요.</div>
+</div>
+{% endblock %}

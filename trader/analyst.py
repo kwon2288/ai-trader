@@ -77,6 +77,18 @@ def build_prompt(ctx: dict) -> str:
     )
 
 
+# 토큰 사용 기록 — runner 가 일지에 쌓도록 연결한다 (provider, model, 입력, 출력)
+USAGE_SINK = None
+
+
+def _record(provider: str, model: str, usage: dict | None) -> None:
+    if USAGE_SINK and usage:
+        try:
+            USAGE_SINK(provider, model, int(usage.get("in", 0)), int(usage.get("out", 0)))
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _extract_json(text: str) -> dict:
     """코드블록·앞뒤 설명이 섞여 와도 첫 JSON 객체를 꺼낸다."""
     text = (text or "").strip()
@@ -171,6 +183,9 @@ class ClaudeAnalyst:
                 msg = self._create(ctx, False)
             else:
                 raise
+        u = getattr(msg, "usage", None)
+        if u:
+            _record("claude", self.model, {"in": u.input_tokens, "out": u.output_tokens})
         raw = None
         for block in msg.content:
             if getattr(block, "type", "") == "tool_use":
@@ -217,9 +232,12 @@ class GeminiAnalyst:
             raise RuntimeError(f"Gemini 응답 없음 (차단 사유: {(data.get('promptFeedback') or {}).get('blockReason', '-')})")
         text = "".join(p.get("text", "") for p in (cands[0].get("content") or {}).get("parts", [])
                        if not p.get("thought"))
-        raw = _extract_json(text)
         u = data.get("usageMetadata") or {}
-        raw["_usage"] = {"in": u.get("promptTokenCount", 0), "out": u.get("candidatesTokenCount", 0)}
+        usage = {"in": u.get("promptTokenCount", 0),
+                 "out": u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0)}  # 생각 토큰도 출력 요금
+        _record("gemini", self.model, usage)                # 답을 못 읽어도 요금은 나가므로 먼저 기록
+        raw = _extract_json(text)
+        raw["_usage"] = usage
         return normalize(raw, self.label)
 
 
@@ -256,12 +274,14 @@ class OpenAIAnalyst:
         text = data.get("output_text") or "".join(
             c.get("text", "") for item in data.get("output") or [] if item.get("type") == "message"
             for c in item.get("content") or [] if c.get("type") == "output_text")
+        u = data.get("usage") or {}
+        usage = {"in": u.get("input_tokens", 0), "out": u.get("output_tokens", 0)}
+        _record("openai", self.model, usage)
         if not text:
             raise RuntimeError(f"OpenAI 응답에 본문이 없습니다 (status={data.get('status')}, "
                                f"사유={(data.get('incomplete_details') or {}).get('reason', '-')})")
         raw = _extract_json(text)
-        u = data.get("usage") or {}
-        raw["_usage"] = {"in": u.get("input_tokens", 0), "out": u.get("output_tokens", 0)}
+        raw["_usage"] = usage
         return normalize(raw, self.label)
 
 

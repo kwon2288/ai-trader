@@ -85,8 +85,11 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
             cfg = market_cfg(cfg, market)
             if not analyze_only and not live_allowed(cfg):
                 raise BrokerError("실계좌 모드는 웹 설정에서 확인 절차를 거쳐 전환하거나 .env 에 I_UNDERSTAND_REAL_MONEY=yes 가 있어야 실행됩니다")
+            from . import analyst as _an
             from .analyst import make_analyst
             from .bot import Bot
+            led = cfg.ledger
+            _an.USAGE_SINK = lambda p, m, ti, to: Journal(cfg.db_path).add_usage(led, p, m, ti, to, source)
             bot = Bot(cfg, make_broker(cfg), make_analyst(cfg), j)
             out = bot.run(force=force, analyze_only=analyze_only)
         except Exception as e:  # noqa: BLE001

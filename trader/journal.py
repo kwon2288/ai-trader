@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS orders(
 CREATE TABLE IF NOT EXISTS bot_positions(code TEXT PRIMARY KEY, name TEXT, opened TEXT);
 CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS run_logs(ts TEXT, mode TEXT, kind TEXT, source TEXT, output TEXT);
+CREATE TABLE IF NOT EXISTS ai_usage(ts TEXT, ledger TEXT, provider TEXT, model TEXT, tin INTEGER, tout INTEGER,
+  source TEXT);
 """
 
 
@@ -195,6 +197,16 @@ class Journal:
     def snapshot(self, mode: str) -> dict | None:
         v = self.get(f"snapshot_{mode}")
         return json.loads(v) if v else None
+
+    # AI 토큰 사용량
+    def add_usage(self, ledger: str, provider: str, model: str, tin: int, tout: int, source: str) -> None:
+        self.db.execute("INSERT INTO ai_usage VALUES(?,?,?,?,?,?,?)",
+                        (now().isoformat(timespec="seconds"), ledger, provider, model, tin, tout, source))
+        self.db.commit()
+
+    def usage(self, since: str | None = None) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM ai_usage WHERE (? IS NULL OR ts >= ?) ORDER BY ts", (since, since))]
 
     def add_log(self, mode: str, kind: str, source: str, output: str) -> None:
         self.db.execute("INSERT INTO run_logs VALUES(?,?,?,?,?)",

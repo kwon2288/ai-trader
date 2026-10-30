@@ -48,6 +48,7 @@
       {% for k, v in order_types.items() %}<option value="{{ k }}" {{ 'selected' if raw.order.type == k }}>{{ v }}</option>{% endfor %}
       </select></div>
   </div>
+  <div style="margin-top:8px"><a href="{{ url_for('usage') }}">📊 AI 사용량 · 비용 · $5로 얼마나 쓸까 →</a></div>
   <div class="mute" style="margin-top:6px">다수결은 AI 수만큼 비용이 들고, 과반이 같은 의견일 때만 매수·매도합니다.</div>
 </div>
 

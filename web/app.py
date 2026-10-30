@@ -335,6 +335,106 @@ def pnl():
                            snap=j.snapshot(c.ledger))
 
 
+def _usage_summary(j, st: dict, since: str | None) -> dict:
+    from trader import pricing
+    groups: dict[tuple, dict] = {}
+    for r in j.usage(since):
+        k = (r["provider"], r["model"])
+        g = groups.setdefault(k, {"provider": r["provider"], "model": r["model"], "calls": 0, "tin": 0, "tout": 0,
+                                  "cost": 0.0, "known": True})
+        g["calls"] += 1
+        g["tin"] += r["tin"]
+        g["tout"] += r["tout"]
+        c_ = pricing.cost(r["provider"], r["model"], r["tin"], r["tout"], st)
+        if c_ is None:
+            g["known"] = False
+        else:
+            g["cost"] += c_
+    rows = sorted(groups.values(), key=lambda g: -g["cost"])
+    return {"rows": rows, "cost": sum(g["cost"] for g in rows), "calls": sum(g["calls"] for g in rows),
+            "tin": sum(g["tin"] for g in rows), "tout": sum(g["tout"] for g in rows)}
+
+
+@app.get("/usage")
+@login_required
+def usage():
+    from trader import pricing
+    from trader.analyst import PROVIDERS, available
+    c = cfg()
+    j = Journal(c.db_path)
+    st = pricing.settings(c.data_dir)
+    today = datetime.now(KST).date()
+    p = request.args.get("p", "month")
+    since = {"month": today.replace(day=1).isoformat(), "30d": (today - timedelta(days=29)).isoformat(),
+             "all": None}.get(p, today.replace(day=1).isoformat())
+    summ = _usage_summary(j, st, since)
+    # 최근 30일로 하루 평균 → 한 달 예상, $충전 시 사용 기간, 충전 잔액
+    recent = j.usage((today - timedelta(days=29)).isoformat())
+    first = min((r["ts"][:10] for r in recent), default=today.isoformat())
+    days = max(1, min(30, (today - datetime.fromisoformat(first).date()).days + 1))
+    proj = {}
+    for prov in PROVIDERS:
+        rs = [r for r in recent if r["provider"] == prov]
+        costs = [pricing.cost(prov, r["model"], r["tin"], r["tout"], st) for r in rs]
+        known = [x for x in costs if x is not None]
+        daily = sum(known) / days
+        cr = st["credits"].get(prov) or {}
+        used = remaining = left_days = None
+        if cr.get("amount"):
+            used = sum(x for r in j.usage(cr.get("since") or None) if r["provider"] == prov
+                       for x in [pricing.cost(prov, r["model"], r["tin"], r["tout"], st)] if x is not None)
+            remaining = float(cr["amount"]) - used
+            left_days = (remaining / daily) if daily > 0 else None
+        proj[prov] = {"label": pricing.PROVIDER_LABEL[prov], "calls": len(rs), "daily": daily, "monthly": daily * 30,
+                      "unknown": len(costs) - len(known), "free": bool(st["free"].get(prov)),
+                      "months": (float(st["budget"]) / (daily * 30)) if daily > 0 else None,
+                      "has_key": available(prov), "credit": cr, "used": used, "remaining": remaining,
+                      "left_days": left_days,
+                      "empty_date": (today + timedelta(days=int(left_days))).isoformat() if left_days is not None
+                      and left_days < 3650 else None}
+    models = sorted({r["model"] for r in j.usage(None)} | set(c.ai_models.values()))
+    return render_template("usage.html", c=c, p=p, summ=summ, proj=proj, st=st, days=days,
+                           models=[(m, pricing.price(m, st), m in st["prices"]) for m in models], today=today)
+
+
+@app.post("/usage/settings")
+@login_required
+def usage_settings():
+    from trader import pricing
+    c = cfg()
+    st = pricing.settings(c.data_dir)
+    f = request.form
+
+    def num(k, lo=0.0, hi=1000.0):
+        try:
+            v = float(str(f.get(k, "")).replace(",", "").replace("$", ""))
+        except ValueError:
+            return None
+        return v if lo <= v <= hi else None
+    b = num("budget", 0.5, 1000)
+    if b:
+        st["budget"] = b
+    st["free"] = {"gemini": bool(f.get("free_gemini"))}
+    for prov in ("claude", "gemini", "openai"):
+        amt, since = num(f"credit_{prov}", 0, 10000), (f.get(f"since_{prov}") or "").strip()
+        if amt:
+            st["credits"][prov] = {"amount": amt, "since": since or datetime.now(KST).date().isoformat()}
+        else:
+            st["credits"].pop(prov, None)
+    for k in f:
+        if k.startswith("pin_"):
+            m = k[4:]
+            pi, po = num(k, 0, 500), num("pout_" + m, 0, 2000)
+            default = pricing.PRICES.get(m)
+            if pi is not None and po is not None and (pi, po) != default:
+                st["prices"][m] = [pi, po]
+            elif default is not None or pi is None:
+                st["prices"].pop(m, None)
+    pricing.save(c.data_dir, st)
+    flash("저장했습니다.", "ok")
+    return redirect(url_for("usage"))
+
+
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings():
