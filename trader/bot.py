@@ -122,12 +122,18 @@ class Bot:
 
     def _rule_exits(self, held: dict, prices: dict, bids: dict, tag: str = "") -> int:
         """손절은 시장가로, 하루 주문 한도와 상관없이 판다. 익절은 설정한 주문 방식·한도를 따른다."""
+        from . import strategy
+        max_hold = strategy.settings(self.cfg)["max_hold_days"]
         n = 0
         for c, h in list(held.items()):
             trig = self._exit_trigger(h)
+            if not trig and max_hold and self.j.held_days(c) != 999 and self.j.held_days(c) >= max_hold:
+                trig = "보유기간 만료"
+                self.say(f"📏 {h.name} {self.j.held_days(c)}일 보유 (최대 {max_hold}일) → 정리")
             if not trig:
                 continue
-            self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig}{tag} 규칙 발동")
+            if trig != "보유기간 만료":
+                self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig}{tag} 규칙 발동")
             qty = min(h.qty, self.broker.sellable_qty(c)) if self.cfg.mode != "dry" else h.qty
             stop = trig == "손절"
             if qty > 0 and self._exec("SELL", c, h.name, qty, bids.get(c) or prices.get(c) or h.now_price, trig + tag,
@@ -349,7 +355,7 @@ class Bot:
             cheapest = min((c["price"] for c in candidates if not c["held"] and c["affordable"]), default=0)
             can_buy = (len(held) < cfg.max_positions and cheapest > 0 and cash_now >= cheapest
                        and not self.no_buy_reason)
-            sig = signals.evaluate(candidates, can_buy=can_buy)
+            sig = signals.evaluate(candidates, can_buy=can_buy, mode=sg["signal"])
             if not sig:
                 why = "" if can_buy else " (매수 여력·빈 자리 없음 → 매도 신호만 확인)"
                 self.say(f"📏 규칙 신호 없음{why} — AI 호출 생략 ({len(candidates)}종목 확인, 토큰 0)")
@@ -361,7 +367,7 @@ class Bot:
                     c["rule_signal"] = sig[c["code"]]["reason"]
             sent = [c for c in candidates if c["code"] in sig]
             allowed = set(sig)
-            self.say(f"📏 규칙 신호 {len(sent)}종목 → AI 확인 (전체 {len(candidates)}종목 중): "
+            self.say(f"📏 규칙 신호({signals.label(sg['signal'])}) {len(sent)}종목 → AI 확인 (전체 {len(candidates)}종목 중): "
                      + ", ".join(f"{c['name']}({'매도' if sig[c['code']]['type'].startswith('SELL') else '매수'})"
                                  for c in sent))
             candidates = sent
@@ -383,6 +389,8 @@ class Bot:
                 "auto_stop_loss_pct": cfg.stop_loss_pct,
                 "auto_take_profit_pct": cfg.take_profit_pct,
                 "min_hold_days": cfg.min_hold_days,
+                "max_hold_days": sg["max_hold_days"],
+                "signal_mode": sg["signal"],
             },
             "portfolio": {
                 "cash": self.avail,

@@ -5,6 +5,8 @@ config [strategy]
   core_pct = 0            # 예산 중 이 비율(%)은 코어 ETF 를 사서 계속 보유 (봇 매매·손절 대상 아님)
   core_kr = "069500"      # 국내 코어 ETF (KODEX 200)
   core_us = "SPYM"        # 미국 코어 ETF (S&P 500)
+  signal = "trend"        # 매매 신호: trend(추세 추종) · dip(눌림목 반등) · breakout(신고가 돌파) · volume(거래량 급증)
+  max_hold_days = 0       # 이 날수가 지나면 수익·손실과 상관없이 정리 (단기 매매용, 0 = 끔)
 """
 from __future__ import annotations
 
@@ -19,8 +21,15 @@ def settings(cfg) -> dict:
         core = max(0, min(90, int(float(s.get("core_pct", 0)))))
     except (TypeError, ValueError):
         core = 0
+    try:
+        max_hold = max(0, min(60, int(float(s.get("max_hold_days", 0)))))
+    except (TypeError, ValueError):
+        max_hold = 0
+    sig = str(s.get("signal", "trend")).strip()
+    from .signals import MODES
     mk = getattr(cfg, "market", "kr")
     return {"market_filter": bool(s.get("market_filter", False)), "core_pct": core,
+            "signal": sig if sig in MODES else "trend", "max_hold_days": max_hold,
             "core_code": str(s.get(f"core_{mk}") or CORE_DEFAULT[mk]).strip().upper() if mk == "us"
             else str(s.get(f"core_{mk}") or CORE_DEFAULT[mk]).strip()}
 

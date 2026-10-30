@@ -110,9 +110,17 @@
   <span class="mute">예산 · AI · 종목 · 미국 주식 설정 저장</span></div>
 </form>
 
-<div class="card sec" id="strategy" data-sum="시장 필터 {{ '켬' if strat.get('market_filter') else '끔' }} · 코어 {{ strat.get('core_pct', 0) }}%">
-  <h2 class="sec-head">전략 — 시장 필터 · 코어-위성</h2>
+{% set sig_labels = {'trend': '추세 추종', 'dip': '눌림목 반등', 'breakout': '신고가 돌파', 'volume': '거래량 급증'} %}
+<div class="card sec" id="strategy" data-sum="{{ sig_labels.get(strat.get('signal', 'trend'), '추세 추종') }}{{ (' · 최대 ' ~ strat.get('max_hold_days') ~ '일') if strat.get('max_hold_days') }} · 시장 필터 {{ '켬' if strat.get('market_filter') else '끔' }} · 코어 {{ strat.get('core_pct', 0) }}%">
+  <h2 class="sec-head">전략 — 매매 신호 · 시장 필터 · 코어-위성</h2>
   <form method="post" action="{{ url_for('strategy_save') }}">
+    <div class="grid2" style="margin-bottom:8px">
+      <div><label for="signal_s">매매 신호</label>
+        <select id="signal_s" name="signal">{% for k, l in sig_labels.items() %}
+          <option value="{{ k }}" {{ 'selected' if strat.get('signal', 'trend') == k }}>{{ l }}</option>{% endfor %}</select></div>
+      <div><label for="max_hold_s">최대 보유일 (지나면 정리, 0 = 제한 없음)</label>
+        <input id="max_hold_s" name="max_hold_days" value="{{ strat.get('max_hold_days', 0) }}" inputmode="numeric"></div>
+    </div>
     <label style="display:flex;gap:8px;align-items:flex-start;color:var(--fg)">
       <input type="checkbox" name="market_filter" style="width:auto;margin-top:3px" {{ 'checked' if strat.get('market_filter') }}>
       <span>시장 필터 — 지수가 200일선 아래면 새로 사지 않기

@@ -40,10 +40,12 @@ def _vol(closes: list[float], n: int = 20) -> float | None:
 def compute(daily: list[dict]) -> dict:
     closes = [float(r["close"]) for r in daily]
     vols = [float(r["volume"]) for r in daily]
+    highs = [float(r.get("high") or r["close"]) for r in daily]
+    lows = [float(r.get("low") or r["close"]) for r in daily]
     if not closes:
         return {}
     last = closes[-1]
-    ma5, ma20, ma60 = _sma(closes, 5), _sma(closes, 20), _sma(closes, 60)
+    ma5, ma10, ma20, ma60 = _sma(closes, 5), _sma(closes, 10), _sma(closes, 20), _sma(closes, 60)
     vol20 = _sma(vols, 20)
 
     def r(x, nd=2):
@@ -54,6 +56,10 @@ def compute(daily: list[dict]) -> dict:
         # 국내(원)는 정수, 미국($)처럼 가격이 작으면 소수까지 — 반올림으로 추세 판단이 틀어지지 않게
         "ma5": r(ma5, 0 if last >= 1000 else 4), "ma20": r(ma20, 0 if last >= 1000 else 4),
         "ma60": r(ma60, 0 if last >= 1000 else 4),
+        "ma10": r(ma10, 0 if last >= 1000 else 4),
+        # 어제까지 20일 최고가 / 10일 최저가 (오늘 제외) — 돌파·이탈 판단용
+        "high_20d_prev": r(max(highs[-21:-1]), 4) if len(highs) >= 21 else None,
+        "low_10d_prev": r(min(lows[-11:-1]), 4) if len(lows) >= 11 else None,
         "price_vs_ma20_pct": r((last / ma20 - 1) * 100) if ma20 else None,
         "ma5_above_ma20": (ma5 > ma20) if (ma5 and ma20) else None,
         "rsi14": r(_rsi(closes)),

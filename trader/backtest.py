@@ -60,7 +60,7 @@ def _regime_map(bench: list[dict] | None) -> dict[str, bool]:
 def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *, stop_pct=None, take_pct=None,
         bench: list[dict] | None = None, min_hold: int | None = None, market_filter: bool = False,
         core_pct: float = 0, core_code: str | None = None, core_bars: list[dict] | None = None,
-        ind_cache: dict | None = None) -> dict:
+        ind_cache: dict | None = None, signal_mode: str = "trend", max_hold: int = 0) -> dict:
     """data: 종목코드 → 일봉(오래된→최신). 반환: 결과 요약·자산 곡선·거래 내역."""
     names = names or {}
     stop = cfg.stop_loss_pct if stop_pct is None else stop_pct
@@ -84,7 +84,7 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
     pos: dict[str, dict] = {}          # code → {qty, cost(수수료 포함), avg, day}
     realized, trades, curve = 0.0, [], []
     paid = {"fees": 0.0}
-    pending: list[tuple[str, str, float]] = []   # (BUY/SELL, code, strength) → 다음 날 시가에
+    pending: list[tuple] = []   # (BUY/SELL, code, strength, 사유) → 다음 날 시가에
 
     def sell(code, px, d, why):
         nonlocal realized
@@ -100,13 +100,13 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
 
     for di, d in enumerate(dates):
         # 1) 어제 신호를 오늘 시가에 실행 (매도 먼저)
-        for side, code, _s in sorted(pending, key=lambda x: (x[0] != "SELL", -x[2])):
+        for side, code, _s, why in sorted(pending, key=lambda x: (x[0] != "SELL", -x[2])):
             i = by_date[code].get(d)
             if i is None:
                 continue
             o = data[code][i]["open"] or data[code][i]["close"]
             if side == "SELL" and code in pos:
-                sell(code, o, d, "규칙 매도")
+                sell(code, o, d, why)
             elif side == "BUY" and code not in pos and len(pos) < maxpos:
                 invested = sum(p["cost"] for p in pos.values())
                 money = min(per, sat_budget - invested)
@@ -149,14 +149,20 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
                           "today_change_pct": round((bars[i]["close"] / prev - 1) * 100, 2) if prev else None, **ind})
         hold_days = int(getattr(cfg, "min_hold_days", 0) or 0) if min_hold is None else int(min_hold)
         buy_ok = len(pos) < maxpos and (not market_filter or regime.get(d, True))
-        for code, s in signals.evaluate(cands, can_buy=buy_ok).items():
+        def held_for(code):
+            return (datetime.strptime(d, "%Y%m%d") - datetime.strptime(pos[code]["day"], "%Y%m%d")).days
+
+        sig = signals.evaluate(cands, can_buy=buy_ok, mode=signal_mode)
+        for code, s in sig.items():
             if s["type"].startswith("SELL"):
-                held_days = (datetime.strptime(d, "%Y%m%d") - datetime.strptime(pos[code]["day"], "%Y%m%d")).days \
-                    if code in pos else 0
-                if held_days >= hold_days:
-                    pending.append(("SELL", code, s["strength"]))
+                if code in pos and held_for(code) >= hold_days:
+                    pending.append(("SELL", code, s["strength"], "규칙 매도"))
             else:
-                pending.append(("BUY", code, s["strength"]))
+                pending.append(("BUY", code, s["strength"], ""))
+        if max_hold:                       # 보유기간 만료 → 다음 날 시가에 정리
+            for code in pos:
+                if held_for(code) >= max_hold and not (code in sig and sig[code]["type"].startswith("SELL")):
+                    pending.append(("SELL", code, 1.0, "보유기간 만료"))
         # 4) 자산 (예산 + 실현 + 평가)
         unreal = 0.0
         for code, p in pos.items():
@@ -196,7 +202,8 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
            "avg_loss": round(sum(t["pnl_pct"] for t in trades if t["pnl"] <= 0) / max(1, len(trades) - len(wins)), 2)
            if len(trades) > len(wins) else None,
            "open_positions": len(pos), "curve": curve, "stop": stop, "take": take, "symbols": len(data),
-           "min_hold": hold_days, "market_filter": market_filter, "core_pct": round(core_budget / budget * 100) if budget else 0,
+           "min_hold": hold_days, "market_filter": market_filter, "signal": signal_mode, "max_hold": int(max_hold or 0),
+           "avg_trade_pct": round(sum(t["pnl_pct"] for t in trades) / len(trades), 2) if trades else None, "core_pct": round(core_budget / budget * 100) if budget else 0,
            "core_code": core_code if core_budget else None,
            "core_pnl": round(core["qty"] * core["last"] - core["cost"], 2) if core["qty"] else 0,
            "fees": round(paid["fees"], 2),
@@ -261,56 +268,84 @@ def prepare(cfg, broker, days: int, symbols: list[str], bench_code: str, core_co
 
 def run_job(cfg, broker, days: int, stop_pct: float, take_pct: float, symbols: list[str], bench_code: str,
             progress=None, min_hold: int | None = None, market_filter: bool | None = None,
-            core_pct: float | None = None) -> dict:
+            core_pct: float | None = None, signal_mode: str | None = None, max_hold: int | None = None) -> dict:
     """데이터를 받아(캐시) 백테스트하고 결과를 저장. 전략 옵션을 안 주면 설정값."""
     from . import strategy
     sg = strategy.settings(cfg)
     market_filter = sg["market_filter"] if market_filter is None else market_filter
     core_pct = sg["core_pct"] if core_pct is None else core_pct
+    signal_mode = sg["signal"] if signal_mode is None else signal_mode
+    max_hold = sg["max_hold_days"] if max_hold is None else max_hold
     t0 = time.time()
     data, names, bench, core_bars = prepare(cfg, broker, days, symbols, bench_code,
                                             sg["core_code"] if core_pct else None, progress)
     res = run(cfg, data, names, stop_pct=stop_pct, take_pct=take_pct, bench=bench, min_hold=min_hold,
-              market_filter=market_filter, core_pct=core_pct, core_code=sg["core_code"], core_bars=core_bars)
+              market_filter=market_filter, core_pct=core_pct, core_code=sg["core_code"], core_bars=core_bars,
+              signal_mode=signal_mode, max_hold=max_hold)
     res["seconds"] = round(time.time() - t0, 1)
     res["bench_code"] = bench_code
     save(cfg.data_dir, cfg.market, res, {"days": days, "stop": stop_pct, "take": take_pct, "symbols": symbols,
                                           "min_hold": res["min_hold"], "market_filter": market_filter,
-                                          "core_pct": core_pct})
+                                          "core_pct": core_pct, "signal": signal_mode, "max_hold": max_hold})
     return res
 
 
 # ── 자동 비교 (여러 조건을 한 번에) ──────────────────────────
-GRID = {"stop": [-5, -8, -12], "take": [10, 20, 35], "min_hold": [2, 7], "market_filter": [False, True],
-        "core_pct": [0, 70]}
+# full: 코어-위성까지 넓게 / short: 단기 매매 전용 (코어 0%, 전략 4가지 × 짧은 손절·익절 × 최대 보유일)
+GRID = {"signal": ["trend"], "stop": [-5, -8, -12], "take": [10, 20, 35], "min_hold": [2, 7],
+        "max_hold": [0], "market_filter": [False, True], "core_pct": [0, 70]}
+SHORT_GRID = {"signal": ["trend", "dip", "breakout", "volume"], "stop": [-3, -5, -8], "take": [5, 7, 10, 15],
+              "min_hold": [1], "max_hold": [0, 5, 10], "market_filter": [False, True], "core_pct": [0]}
+GRIDS = {"full": GRID, "short": SHORT_GRID}
 
 
-def sweep(cfg, broker, days: int, symbols: list[str], bench_code: str, progress=None, grid: dict | None = None) -> dict:
+def grid_size(g: dict) -> int:
+    n = 1
+    for v in g.values():
+        n *= len(v)
+    return n
+
+
+def sweep(cfg, broker, days: int, symbols: list[str], bench_code: str, progress=None, grid: dict | None = None,
+          kind: str = "full") -> dict:
     """조건 조합을 모두 돌려 결과 표를 만든다 (데이터·지표는 한 번만 계산)."""
     from itertools import product
     from . import strategy
-    g = grid or GRID
+    g = {**GRIDS.get(kind, GRID), **(grid or {})}
     sg = strategy.settings(cfg)
     t0 = time.time()
-    data, names, bench, core_bars = prepare(cfg, broker, days, symbols, bench_code, sg["core_code"], progress)
+    need_core = any(g["core_pct"])
+    data, names, bench, core_bars = prepare(cfg, broker, days, symbols, bench_code,
+                                            sg["core_code"] if need_core else None, progress)
     ind_cache: dict = {}
-    combos = list(product(g["stop"], g["take"], g["min_hold"], g["market_filter"], g["core_pct"]))
+    keys = ("signal", "stop", "take", "min_hold", "max_hold", "market_filter", "core_pct")
+    combos = list(product(*(g[k] for k in keys)))
     rows = []
-    for k, (st, tk, mh, mf, cp) in enumerate(combos, 1):
-        if progress:
+    for k, (sm, st, tk, mh, xh, mf, cp) in enumerate(combos, 1):
+        if progress and (k % 4 == 1 or k == len(combos)):
             progress(k, len(combos), f"조합 {k}/{len(combos)}")
         r = run(cfg, data, names, stop_pct=st, take_pct=tk, bench=bench, min_hold=mh, market_filter=mf,
-                core_pct=cp, core_code=sg["core_code"], core_bars=core_bars, ind_cache=ind_cache)
-        rows.append({"stop": st, "take": tk, "min_hold": mh, "market_filter": mf, "core_pct": cp,
-                     "return_pct": r["return_pct"], "mdd_pct": r["mdd_pct"], "n": r["n"], "win_rate": r["win_rate"],
-                     "fees": r["fees"], "bench_pct": r.get("bench_pct")})
+                core_pct=cp, core_code=sg["core_code"], core_bars=core_bars, ind_cache=ind_cache,
+                signal_mode=sm, max_hold=xh)
+        rows.append({"signal": sm, "stop": st, "take": tk, "min_hold": mh, "max_hold": xh, "market_filter": mf,
+                     "core_pct": cp, "return_pct": r["return_pct"], "mdd_pct": r["mdd_pct"], "n": r["n"],
+                     "win_rate": r["win_rate"], "fees": r["fees"], "bench_pct": r.get("bench_pct"),
+                     "avg_trade_pct": r["avg_trade_pct"], "gross_return_pct": r["gross_return_pct"]})
     # 추천: 수익률만 보지 않고 낙폭을 함께 본다 (수익률 − 0.5 × |최대 낙폭|), 거래가 너무 적은 조합은 뒤로
+    few = 10 if kind == "short" else 5
     for x in rows:
-        x["score"] = round(x["return_pct"] - 0.5 * abs(x["mdd_pct"]) - (5 if x["n"] < 5 and not x["core_pct"] else 0), 2)
+        x["score"] = round(x["return_pct"] - 0.5 * abs(x["mdd_pct"])
+                           - (5 if x["n"] < few and not x["core_pct"] else 0), 2)
     rows.sort(key=lambda x: -x["score"])
-    out = {"ts": datetime.now(KST).isoformat(timespec="seconds"), "days": days, "symbols": symbols,
+    # 전략별 최고 (단기 비교에서 어떤 방식이 이 종목들과 맞는지 한눈에)
+    best_by = {}
+    for x in rows:
+        best_by.setdefault(x["signal"], x)
+    out = {"ts": datetime.now(KST).isoformat(timespec="seconds"), "days": days, "symbols": symbols, "kind": kind,
            "bench_pct": rows[0]["bench_pct"] if rows else None, "rows": rows, "seconds": round(time.time() - t0, 1),
-           "start": None, "end": None}
+           "start": None, "end": None, "fee_pct": rows and costs_of(cfg)["us_fee_pct" if cfg.market == "us" else "kr_fee_pct"],
+           "best_by_signal": list(best_by.values()),
+           "positive": sum(1 for x in rows if x["return_pct"] > 0)}
     if data:
         dd = sorted({b["date"] for v in data.values() for b in v})
         out["start"], out["end"] = dd[min(WARMUP, len(dd) - 1)], dd[-1]

@@ -13,6 +13,11 @@
           {% for d, l in [(250,'최근 1년'),(500,'최근 2년'),(750,'최근 3년')] %}
           <option value="{{ d }}" {{ 'selected' if (r and r.params.days == d) or (not r and d == 500) }}>{{ l }}</option>{% endfor %}
         </select></div>
+      <div><label for="signal">매매 신호</label>
+        <select id="signal" name="signal">{% set cur_sig = r.params.signal if r and r.params.signal is defined else sg.signal %}
+          {% for k, l in modes.items() %}<option value="{{ k }}" {{ 'selected' if k == cur_sig }}>{{ l }}</option>{% endfor %}
+        </select></div>
+      <div><label for="max_hold">최대 보유일 (지나면 정리, 0 = 제한 없음)</label><input id="max_hold" name="max_hold" value="{{ r.params.max_hold if r and r.params.max_hold is defined else sg.max_hold_days }}" inputmode="numeric"></div>
       <div><label for="stop">손절 (%)</label><input id="stop" name="stop" value="{{ r.params.stop if r else c.stop_loss_pct }}" inputmode="decimal"></div>
       <div><label for="take">익절 (%)</label><input id="take" name="take" value="{{ r.params.take if r else c.take_profit_pct }}" inputmode="decimal"></div>
       <div><label for="min_hold">최소 보유일 (규칙 매도 전)</label><input id="min_hold" name="min_hold" value="{{ r.params.min_hold if r and r.params.min_hold is defined else c.min_hold_days }}" inputmode="numeric"></div>
@@ -26,42 +31,58 @@
       <input type="checkbox" name="market_filter" style="width:auto" {{ 'checked' if (r and r.params.market_filter) or (not r and sg.market_filter) }}>
       시장 필터 — 지수가 200일선 아래면 새로 사지 않기</label>
     <div class="row" style="margin-top:10px;gap:6px"><button class="btn pri" {{ 'disabled' if busy }}>🧪 백테스트 실행</button>
-      <button class="btn" name="mode" value="sweep" {{ 'disabled' if busy }}>🔍 자동 비교 (72개 조합)</button>
+      <button class="btn" name="mode" value="short" {{ 'disabled' if busy }}>⚡ 단기 매매 비교 ({{ n_short }}개)</button>
+      <button class="btn" name="mode" value="sweep" {{ 'disabled' if busy }}>🔍 코어 포함 비교 ({{ n_full }}개)</button>
       {% if busy and job.kind == 'backtest' %}<span class="badge b-warn" id="busy">⏳ 실행 중 {{ job.get('progress', '') }}</span>{% endif %}</div>
   </form>
-  <div class="mute" style="margin-top:8px"><b>자동 비교</b>는 손절(-5/-8/-12%) × 익절(+10/20/35%) × 최소 보유(2/7일) ×
-    시장 필터(끔/켬) × 코어(0/70%)를 모두 돌려 순위를 매겨요. 위의 기간·종목을 그대로 써요.<br>
+  <div class="mute" style="margin-top:8px"><b>⚡ 단기 매매 비교</b>는 코어 없이(0%) 매매 신호 4가지(추세 추종 · 눌림목 반등 ·
+    신고가 돌파 · 거래량 급증) × 손절(-3/-5/-8%) × 익절(+5/7/10/15%) × 최대 보유(제한 없음/5/10일) × 시장 필터(끔/켬)를 돌려요.
+    <b>🔍 코어 포함 비교</b>는 추세 추종에 코어(0/70%)까지 넣어 길게 보는 비교예요. 위의 기간·종목을 그대로 써요.<br>
+    <b>신호 설명</b> — 추세 추종: 이동평균이 올라가는 종목을 따라 삼 · 눌림목 반등: 상승 흐름에서 RSI 35 아래로 빠졌다 반등하는 날 사서 RSI 60에 팖 ·
+    신고가 돌파: 20일 최고가를 거래량 1.5배 이상으로 넘으면 사고 10일 최저가 밑으로 가면 팖 ·
+    거래량 급증: 거래량 2배 이상 + 1~8% 상승 마감이면 사고 5일선 밑으로 가면 팖.<br>
     AI 없이 <b>규칙 신호 + 손절·익절</b>만 시뮬레이션해요. 신호는 그날 종가로 판단해 다음 날 시가에 사고,
     손절·익절은 장중 저가·고가로 확인해요. 수수료·세금 반영. 실제 봇은 AI가 한 번 더 걸러 매매가 더 적어요.</div>
 </div>
 
 {% if sw %}
 <div class="card" id="sweep">
-  <h2>🔍 자동 비교 결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ sw.ts[5:16].replace('T',' ') }} · {{ sw.rows|length }}개 조합 · {{ sw.seconds }}초{% if sw.bench_pct is not none %} · {{ bench[1] }} {{ "%+.2f"|format(sw.bench_pct) }}%{% endif %}</span></h2>
+  <h2>{{ '⚡ 단기 매매 비교' if sw.kind == 'short' else '🔍 자동 비교' }} 결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ sw.ts[5:16].replace('T',' ') }} · {{ sw.rows|length }}개 조합 · {{ sw.seconds }}초{% if sw.bench_pct is not none %} · {{ bench[1] }} {{ "%+.2f"|format(sw.bench_pct) }}%{% endif %}</span></h2>
+  {% if sw.best_by_signal and sw.best_by_signal|length > 1 %}
+  <div class="stats" style="margin-bottom:10px">
+    {% for x in sw.best_by_signal %}
+    <div class="stat"><div class="k">{{ modes.get(x.signal, x.signal) }} 최고</div><div class="v">{{ pct(x.return_pct) }}</div>
+      <div class="mute">낙폭 {{ "%.1f"|format(x.mdd_pct) }}% · {{ x.n }}회{% if x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></div>
+    {% endfor %}
+  </div>
+  <div class="mute" style="margin-bottom:8px">플러스로 끝난 조합 {{ sw.positive }}/{{ sw.rows|length }}개{% if sw.fee_pct %} · 수수료 한쪽 {{ sw.fee_pct }}% 기준{% endif %}</div>
+  {% endif %}
   <div class="scroll"><table>
     <tr><th>#</th><th>조건</th><th class="r">수익률 · 낙폭</th><th></th></tr>
     {% for x in sw.rows[:15] %}
     <tr {% if loop.first %}style="background:var(--okbg)"{% endif %}>
       <td>{{ loop.index }}{% if loop.first %}<div style="font-size:11px">추천</div>{% endif %}</td>
-      <td style="font-size:13px">손절 {{ x.stop }}% · 익절 +{{ x.take }}%<div class="mute">보유 {{ x.min_hold }}일{{ ' · 필터' if x.market_filter }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회</div></td>
+      <td style="font-size:13px">{% if sw.kind == 'short' %}<b>{{ modes.get(x.signal, x.signal) }}</b> · {% endif %}손절 {{ x.stop }}% · 익절 +{{ x.take }}%<div class="mute">{% if sw.kind == 'short' %}최대 {{ (x.max_hold ~ '일') if x.max_hold else '제한 없음' }}{% else %}보유 {{ x.min_hold }}일{% endif %}{{ ' · 필터' if x.market_filter }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회{% if x.avg_trade_pct is defined and x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></td>
       <td class="r nw">{{ pct(x.return_pct) }}<div class="mute"><span class="down">{{ "%.1f"|format(x.mdd_pct) }}%</span>{{ ' · 지수↑' if x.bench_pct is not none and x.return_pct > x.bench_pct }}</div></td>
       <td><form method="post" action="{{ url_for('strategy_apply') }}" class="inline"
             onsubmit="return confirm('이 조건을 실제 설정에 적용할까요? (국내·미국 공통, 다음 실행부터)')">
         <input type="hidden" name="stop" value="{{ x.stop }}"><input type="hidden" name="take" value="{{ x.take }}">
         <input type="hidden" name="min_hold" value="{{ x.min_hold }}"><input type="hidden" name="core_pct" value="{{ x.core_pct }}">
         <input type="hidden" name="market_filter" value="{{ '1' if x.market_filter else '0' }}">
+        <input type="hidden" name="signal" value="{{ x.signal or 'trend' }}"><input type="hidden" name="max_hold" value="{{ x.max_hold or 0 }}">
         <button class="btn" style="padding:4px 9px;font-size:12px;white-space:nowrap">적용</button></form></td></tr>
     {% endfor %}
   </table></div>
   <div class="mute" style="margin-top:6px">순위 = 수익률 − 최대 낙폭의 절반 (많이 벌어도 크게 흔들리면 감점). 과거에 가장 잘 맞은 조건이
     앞으로도 최고라는 보장은 없어요 — 1등만 보지 말고 비슷한 조건들이 고르게 상위권인지 보세요(그게 더 믿을 만해요).
-    ‘적용’하면 손절·익절·최소 보유일·시장 필터·코어 비중이 실제 설정으로 들어가요.</div>
+    ‘적용’하면 매매 신호·손절·익절·최소/최대 보유일·시장 필터·코어 비중이 실제 설정으로 들어가요.<br>
+    <b>거래당</b> = 수수료·세금을 뺀 한 번 거래의 평균 수익률. 단기 매매는 이게 플러스여야 오래 할수록 벌어요.</div>
 </div>
 {% endif %}
 
 {% if r %}
 <div class="card">
-  <h2>결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ r.start[:4] }}-{{ r.start[4:6] }}-{{ r.start[6:] }} ~ {{ r.end[:4] }}-{{ r.end[4:6] }}-{{ r.end[6:] }} · 손절 {{ r.stop }}% · 익절 +{{ r.take }}%{% if r.min_hold is defined %} · 보유 {{ r.min_hold }}일{% endif %}{% if r.market_filter %} · 시장필터{% endif %}{% if r.core_pct %} · 코어 {{ r.core_pct }}%{% endif %} · {{ r.symbols }}종목</span></h2>
+  <h2>결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ r.start[:4] }}-{{ r.start[4:6] }}-{{ r.start[6:] }} ~ {{ r.end[:4] }}-{{ r.end[4:6] }}-{{ r.end[6:] }} {% if r.signal is defined %} · {{ modes.get(r.signal, r.signal) }}{% endif %} · 손절 {{ r.stop }}% · 익절 +{{ r.take }}%{% if r.max_hold %} · 최대 {{ r.max_hold }}일{% endif %}{% if r.min_hold is defined %} · 보유 {{ r.min_hold }}일{% endif %}{% if r.market_filter %} · 시장필터{% endif %}{% if r.core_pct %} · 코어 {{ r.core_pct }}%{% endif %} · {{ r.symbols }}종목</span></h2>
   <div class="stats">
     <div class="stat"><div class="k">봇 전략 수익률</div><div class="v">{{ pct(r.return_pct) }}</div>
       <div class="mute">{{ ('+' if r.pnl >= 0 else '') ~ num(r.pnl, cur) }}</div></div>

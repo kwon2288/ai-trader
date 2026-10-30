@@ -65,11 +65,106 @@ def sell_signal(c: dict) -> dict | None:
     return None
 
 
-def evaluate(candidates: list[dict], can_buy: bool = True) -> dict[str, dict]:
+# ── 단기 매매용 전략들 ([strategy] signal 로 고름) ─────────────────────
+DIP_MAX_RSI = 35.0          # 눌림목: 이 아래로 빠졌다가
+DIP_EXIT_RSI = 60.0         #        여기까지 반등하면 판다
+BREAKOUT_MIN_VOL = 1.5      # 돌파: 거래량이 20일 평균의 1.5배 이상
+VOLUME_MIN = 2.0            # 거래량 급증: 20일 평균의 2배 이상
+VOLUME_CHG = (1.0, 8.0)     #   그날 +1 ~ +8% 오른 날만 (너무 급등한 날은 거름)
+
+
+def _ok(c):
+    return not (c.get("held") or c.get("warnings") or not c.get("affordable", True))
+
+
+def dip_buy(c):
+    """눌림목(과매도 반등): 60일선 위 상승 흐름에서 RSI가 35 아래로 빠진 뒤 오늘 반등."""
+    if not _ok(c):
+        return None
+    close, ma60, rsi, chg = (_num(c.get(k)) for k in ("close", "ma60", "rsi14", "today_change_pct"))
+    if None in (close, rsi, chg) or (ma60 is not None and close < ma60 * 0.97):
+        return None
+    if rsi <= DIP_MAX_RSI and chg > 0:
+        return {"type": "BUY_DIP", "strength": round(0.6 + min(0.2, (DIP_MAX_RSI - rsi) / 50), 2),
+                "reason": f"눌림목 반등: RSI {rsi:.0f}, 오늘 {chg:+.1f}%"}
+    return None
+
+
+def dip_sell(c):
+    if not c.get("held"):
+        return None
+    rsi, close, ma60 = _num(c.get("rsi14")), _num(c.get("close")), _num(c.get("ma60"))
+    if rsi is not None and rsi >= DIP_EXIT_RSI:
+        return {"type": "SELL_REBOUND", "strength": 0.7, "reason": f"반등 완료: RSI {rsi:.0f}"}
+    if close and ma60 and close < ma60 * 0.93:
+        return {"type": "SELL_BELOW_MA60", "strength": 0.7, "reason": f"60일선 {(close / ma60 - 1) * 100:+.1f}% — 흐름 꺾임"}
+    return None
+
+
+def breakout_buy(c):
+    """돌파: 오늘 종가가 어제까지 20일 최고가를 넘고 거래량이 붙음."""
+    if not _ok(c):
+        return None
+    close, hi, vol, rsi = (_num(c.get(k)) for k in ("close", "high_20d_prev", "volume_vs_20d_avg", "rsi14"))
+    if None in (close, hi, vol) or not hi:
+        return None
+    if close > hi and vol >= BREAKOUT_MIN_VOL and (rsi is None or rsi <= 80):
+        return {"type": "BUY_BREAKOUT", "strength": round(0.6 + min(0.2, (vol - 1) / 10), 2),
+                "reason": f"20일 신고가 돌파: {(close / hi - 1) * 100:+.1f}%, 거래량 {vol:.1f}배"}
+    return None
+
+
+def breakout_sell(c):
+    if not c.get("held"):
+        return None
+    close, lo = _num(c.get("close")), _num(c.get("low_10d_prev"))
+    if close and lo and close < lo:
+        return {"type": "SELL_CHANNEL", "strength": 0.7, "reason": "10일 최저가 이탈"}
+    return None
+
+
+def volume_buy(c):
+    """거래량 급증: 20일 평균 2배 이상 거래 + 상승 마감 + 20일선 위."""
+    if not _ok(c):
+        return None
+    close, ma20, vol, chg = (_num(c.get(k)) for k in ("close", "ma20", "volume_vs_20d_avg", "today_change_pct"))
+    if None in (close, ma20, vol, chg):
+        return None
+    if vol >= VOLUME_MIN and VOLUME_CHG[0] <= chg <= VOLUME_CHG[1] and close >= ma20:
+        return {"type": "BUY_VOLUME", "strength": round(0.6 + min(0.2, (vol - 2) / 10), 2),
+                "reason": f"거래량 급증 {vol:.1f}배, 오늘 {chg:+.1f}%"}
+    return None
+
+
+def volume_sell(c):
+    if not c.get("held"):
+        return None
+    close, ma5, rsi = _num(c.get("close")), _num(c.get("ma5")), _num(c.get("rsi14"))
+    if close and ma5 and close < ma5 * 0.99:
+        return {"type": "SELL_MA5", "strength": 0.7, "reason": f"5일선 이탈 {(close / ma5 - 1) * 100:+.1f}%"}
+    if rsi is not None and rsi >= SELL_RSI:
+        return {"type": "SELL_OVERHEAT", "strength": 0.65, "reason": f"과열: RSI {rsi:.0f}"}
+    return None
+
+
+MODES = {
+    "trend": ("추세 추종", buy_signal, sell_signal),
+    "dip": ("눌림목 반등", dip_buy, dip_sell),
+    "breakout": ("신고가 돌파", breakout_buy, breakout_sell),
+    "volume": ("거래량 급증", volume_buy, volume_sell),
+}
+
+
+def label(mode: str) -> str:
+    return MODES.get(mode, MODES["trend"])[0]
+
+
+def evaluate(candidates: list[dict], can_buy: bool = True, mode: str = "trend") -> dict[str, dict]:
     """종목코드 → 신호. 살 자리가 없으면(can_buy=False) 매수 신호는 세지 않는다."""
+    _, buy_fn, sell_fn = MODES.get(mode, MODES["trend"])
     out = {}
     for c in candidates:
-        s = sell_signal(c) or (buy_signal(c) if can_buy else None)
+        s = sell_fn(c) or (buy_fn(c) if can_buy else None)
         if s:
             out[c["code"]] = s
     return out
@@ -84,7 +179,7 @@ class RulesAnalyst:
         pf = ctx.get("portfolio", {})
         rules = ctx.get("rules", {})
         slots = rules.get("max_positions", 1) - len(pf.get("positions", []))
-        sig = evaluate(ctx.get("candidates", []), can_buy=slots > 0)
+        sig = evaluate(ctx.get("candidates", []), can_buy=slots > 0, mode=rules.get("signal_mode", "trend"))
         decisions = []
         for code, s in sig.items():
             if s["type"].startswith("SELL"):

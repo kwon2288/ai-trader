@@ -28,7 +28,7 @@ def test_stop_loss_on_gap_down_next_day_execution():
     data = {"000001": bars(prices)}
     dates = [b["date"] for b in data["000001"]]
     orig = backtest.signals.evaluate
-    backtest.signals.evaluate = lambda cands, can_buy=True: (
+    backtest.signals.evaluate = lambda cands, can_buy=True, **_k: (
         {"000001": {"type": "BUY_TREND", "strength": 0.7}} if any(
             c["code"] == "000001" and not c["held"] and c["close"] == 10_000 for c in cands) and can_buy else {})
     try:
