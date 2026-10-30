@@ -45,6 +45,30 @@ def test_sink_records_and_page():
     assert st["budget"] == 10 and st["prices"]["claude-sonnet-5-5"] == [1.0, 5.0] and not st["free"]["gemini"]
 
 
+def test_change_models_from_usage_page():
+    import shutil
+    import tomllib
+    import web.app as W
+    tmp = Path(tempfile.mkdtemp()) / "config.toml"
+    shutil.copy(Path(__file__).resolve().parent.parent / "config.example.toml", tmp)
+    old = W.CONFIG_PATH
+    W.CONFIG_PATH = tmp
+    try:
+        cl = W.app.test_client()
+        with cl.session_transaction() as s:
+            s["ok"] = True
+        h = cl.get("/usage").get_data(as_text=True)
+        assert "AI · 모델 바꾸기" in h and "월 ≈" in h
+        cl.post("/usage/models", data={"provider": "consensus", "claude_model": "claude-haiku-5-5",
+                                       "gemini_model": "gemini-3.8-flash", "openai_model": "gpt-6-luna"})
+        a = tomllib.loads(tmp.read_text())["ai"]
+        assert (a["provider"], a["claude_model"], a["openai_model"]) == ("consensus", "claude-haiku-5-5", "gpt-6-luna")
+        cl.post("/usage/models", data={"provider": "evil", "claude_model": "x"})
+        assert tomllib.loads(tmp.read_text())["ai"]["provider"] == "consensus"
+    finally:
+        W.CONFIG_PATH = old
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

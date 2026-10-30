@@ -59,6 +59,29 @@
   {% endif %}
 </div>
 
+<div class="card" id="models">
+  <h2>AI · 모델 바꾸기</h2>
+  <form method="post" action="{{ url_for('usage_models') }}">
+    <label for="provider">판단에 쓸 AI</label>
+    <select id="provider" name="provider">
+    {% for k, v in providers.items() %}
+      <option value="{{ k }}" {{ 'selected' if c.ai_provider == k }}>{{ v }}{% if k in keys and not keys[k] %} — 키 없음{% endif %}</option>
+    {% endfor %}
+    </select>
+    {% for ch in choices %}
+    <label for="m_{{ ch.key }}">{{ ch.label }}{% if not keys[ch.prov] %} <span class="mute">(키 없음)</span>{% endif %}</label>
+    <select id="m_{{ ch.key }}" name="{{ ch.key }}">
+      {% for it in ch.opts %}
+      <option value="{{ it.val }}" {{ 'selected' if it.val == ch.cur }}>{{ it.desc }}{% if ch.free %} · 무료 등급{% elif it.monthly is not none %} · 월 ≈{{ usd(it.monthly) }}{% else %} · 단가 모름{% endif %}</option>
+      {% endfor %}
+    </select>
+    {% endfor %}
+    <div class="row" style="margin-top:10px"><button class="btn pri">AI · 모델 저장</button></div>
+  </form>
+  <div class="mute" style="margin-top:8px">‘월 ≈’ 은 최근 사용량(기록이 없는 AI는 다른 AI의 평균)을 그 모델 단가로 계산한 한 달 예상이에요.
+    다수결은 키가 있는 AI 모두의 비용이 더해져요. 규칙필터(토큰 절약)는 설정 → AI 에서.</div>
+</div>
+
 <div class="card">
   <h2>계산 설정</h2>
   <form method="post" action="{{ url_for('usage_settings') }}">

@@ -393,8 +393,52 @@ def usage():
                       "empty_date": (today + timedelta(days=int(left_days))).isoformat() if left_days is not None
                       and left_days < 3650 else None}
     models = sorted({r["model"] for r in j.usage(None)} | set(c.ai_models.values()))
+    # 모델 바꾸기: 최근 하루 평균 토큰(AI별, 기록 없으면 다른 AI 평균)으로 모델마다 한 달 예상 비용
+    tok = {}
+    for prov in PROVIDERS:
+        rs = [r for r in recent if r["provider"] == prov]
+        tok[prov] = (sum(r["tin"] for r in rs) / days, sum(r["tout"] for r in rs) / days) if rs else None
+    known = [t for t in tok.values() if t]
+    fallback = (sum(t[0] for t in known) / len(known), sum(t[1] for t in known) / len(known)) if known else (6000, 900)
+    choices = []
+    for key, label, opts in settings_io.MODEL_FIELDS:
+        prov = key.split("_")[0]
+        ti, to = tok.get(prov) or fallback
+        cur = c.ai_models.get(prov)
+        items = []
+        for val, desc in opts + ([(cur, f"{cur} (현재 설정)")] if cur not in [o[0] for o in opts] else []):
+            pr = pricing.price(val, st)
+            items.append({"val": val, "desc": desc, "price": pr,
+                          "monthly": None if pr is None else (ti * pr[0] + to * pr[1]) / 1e6 * 30})
+        choices.append({"key": key, "label": label, "prov": prov, "cur": cur, "opts": items,
+                        "free": bool(st["free"].get(prov)), "basis": "실사용" if tok.get(prov) else "추정"})
     return render_template("usage.html", c=c, p=p, summ=summ, proj=proj, st=st, days=days,
+                           choices=choices, providers=settings_io.PROVIDER_CHOICES,
+                           keys={pv: available(pv) for pv in PROVIDERS},
                            models=[(m, pricing.price(m, st), m in st["prices"]) for m in models], today=today)
+
+
+@app.post("/usage/models")
+@login_required
+def usage_models():
+    import re as _re
+    prov = request.form.get("provider", "")
+    if prov not in settings_io.PROVIDER_CHOICES:
+        flash("AI 선택이 올바르지 않습니다.", "err")
+        return redirect(url_for("usage") + "#models")
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    text = settings_io._set(text, "ai", "provider", prov)
+    for key, label, _opts in settings_io.MODEL_FIELDS:
+        m = (request.form.get(key) or "").strip()
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9.\-]{2,60}", m):
+            flash(f"{label} 이름이 올바르지 않습니다.", "err")
+            return redirect(url_for("usage") + "#models")
+        text = settings_io._set(text, "ai", key, m)
+    CONFIG_PATH.write_text(text, encoding="utf-8")
+    c = cfg()
+    flash(f"저장했습니다: {settings_io.PROVIDER_CHOICES[prov].split(' (')[0].split(' —')[0]} · "
+          + ", ".join(c.ai_models.values()) + " — 다음 실행부터 적용", "ok")
+    return redirect(url_for("usage") + "#models")
 
 
 @app.post("/usage/settings")
