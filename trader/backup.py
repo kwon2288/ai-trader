@@ -13,7 +13,7 @@ import sqlite3
 import tempfile
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import ROOT
@@ -42,7 +42,11 @@ def make(data_dir: Path, raw: dict) -> tuple[Path, list[str]]:
     """백업 zip 을 만들고 (경로, 메모) 반환."""
     st = settings(raw)
     data_dir = Path(data_dir)
-    out = folder(data_dir) / f"ai-trader-{datetime.now(KST):%Y%m%d-%H%M%S}.zip"
+    now_ = datetime.now(KST)
+    out = folder(data_dir) / f"ai-trader-{now_:%Y%m%d-%H%M%S}.zip"
+    while out.exists():                                  # 같은 초에 두 번이면 1초 뒤 이름으로
+        now_ = now_ + timedelta(seconds=1)
+        out = folder(data_dir) / f"ai-trader-{now_:%Y%m%d-%H%M%S}.zip"
     notes = []
     with tempfile.TemporaryDirectory() as tmp:
         db = data_dir / "journal.db"
@@ -112,3 +116,54 @@ def daily(j, data_dir: Path, raw: dict, warn=None) -> Path | None:
     if bad and warn:
         warn("💾 백업은 서버에 저장됐지만 " + "; ".join(bad))
     return p
+
+
+# ── 복구 ─────────────────────────────────────────────────
+ALLOWED = {"data/journal.db", "data/mode.json", "data/ai_cost.json", "data/passkeys.json", "config.toml", ".env"}
+LABEL = {"data/journal.db": "매매 기록", "config.toml": "설정", "data/mode.json": "실행 모드",
+         "data/ai_cost.json": "AI 비용 설정", "data/passkeys.json": "패스키", ".env": "연결 정보(.env)"}
+
+
+def inspect(zip_path: Path) -> dict:
+    """복구 전에 백업 내용을 확인. 허용되지 않은 파일이 있거나 DB 가 깨졌으면 예외."""
+    with zipfile.ZipFile(zip_path) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        bad = [n for n in names if n not in ALLOWED]
+        if bad:
+            raise ValueError(f"이 프로그램의 백업이 아닙니다 (모르는 파일: {', '.join(bad[:3])})")
+        if "data/journal.db" not in names:
+            raise ValueError("백업에 매매 기록(journal.db)이 없습니다")
+        info = {"files": names, "labels": [LABEL[n] for n in names]}
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "journal.db"
+            db.write_bytes(z.read("data/journal.db"))
+            con = sqlite3.connect(db)
+            try:
+                ok = con.execute("PRAGMA integrity_check").fetchone()[0]
+                if ok != "ok":
+                    raise ValueError(f"백업의 매매 기록이 손상됐습니다: {ok}")
+                info["orders"] = con.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+                last = con.execute("SELECT MAX(ts) FROM orders").fetchone()[0]
+                info["last_order"] = (last or "")[:16].replace("T", " ")
+            finally:
+                con.close()
+    return info
+
+
+def restore(data_dir: Path, zip_path: Path, raw: dict, with_env: bool = False) -> tuple[list[str], Path]:
+    """백업으로 되돌린다. 되돌리기 직전 상태를 먼저 백업해 둔다. 반환: (복구한 항목, 직전 상태 백업)"""
+    inspect(zip_path)
+    with zipfile.ZipFile(zip_path) as z:                 # 직전 상태 백업 전에 내용을 먼저 읽어 둔다
+        files = {n: z.read(n) for n in z.namelist() if n in ALLOWED and (n != ".env" or with_env)}
+    before, _ = make(data_dir, raw)
+    data_dir = Path(data_dir)
+    done = []
+    if True:
+        for n, blob in files.items():
+            dst = (data_dir / n[5:]) if n.startswith("data/") else (ROOT / n)
+            tmp = dst.with_name(dst.name + ".restore")
+            tmp.write_bytes(blob)
+            os.chmod(tmp, 0o600)
+            tmp.replace(dst)
+            done.append(LABEL[n])
+    return done, before

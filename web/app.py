@@ -902,6 +902,76 @@ def backup_download(name):
     return send_from_directory(backup.folder(cfg().data_dir), name, as_attachment=True)
 
 
+RESTORE_PHRASE = "복구"
+
+
+@app.post("/backup/restore")
+@login_required
+def backup_restore():
+    """서버의 백업 목록에서 고르거나 zip 을 올려 되돌린다 (비밀번호 + 확인 문구, 직전 상태 자동 백업)."""
+    import re as _re
+    from trader import backup
+    c = cfg()
+    back = redirect(url_for("settings") + "#backup")
+    if not _pw_ok(request.form.get("password", "")):
+        time.sleep(1.0)
+        flash("웹 비밀번호가 맞지 않습니다.", "err")
+        return back
+    if request.form.get("phrase", "").strip() != RESTORE_PHRASE:
+        flash(f"확인 문구를 정확히 입력하세요: {RESTORE_PHRASE}", "err")
+        return back
+    if _busy(c):
+        flash("매매·분석이 실행 중입니다. 끝난 뒤 다시 시도하세요.", "err")
+        return back
+    up = request.files.get("file")
+    tmp = None
+    name = request.form.get("name", "")
+    if up and up.filename:
+        tmp = c.data_dir / f"upload-restore-{int(time.time())}.zip"
+        up.save(tmp)
+        src = tmp
+    elif name.startswith("remote:"):
+        from trader import remote
+        tmp = c.data_dir / f"remote-restore-{int(time.time())}.zip"
+        try:
+            src = remote.download(settings_io.read(CONFIG_PATH), name[7:], tmp)
+        except Exception as e:  # noqa: BLE001
+            tmp.unlink(missing_ok=True)
+            flash(f"원격 백업을 받지 못했습니다: {e}", "err")
+            return back
+    else:
+        if not _re.fullmatch(r"ai-trader-\d{8}-\d{6}\.zip", name) or not (backup.folder(c.data_dir) / name).exists():
+            flash("복구할 백업을 고르거나 zip 파일을 올리세요.", "err")
+            return back
+        src = backup.folder(c.data_dir) / name
+    try:
+        info = backup.inspect(src)
+        done, before = backup.restore(c.data_dir, src, settings_io.read(CONFIG_PATH),
+                                      with_env=bool(request.form.get("with_env")))
+    except Exception as e:  # noqa: BLE001
+        flash(f"복구하지 않았습니다: {e}", "err")
+        return back
+    finally:
+        if tmp:
+            tmp.unlink(missing_ok=True)
+    Journal(cfg().db_path).add_log(c.ledger, "backup", "web",
+                                   f"복구: {', '.join(done)} (주문 {info['orders']}건, 마지막 {info['last_order']}) · "
+                                   f"직전 상태는 {before.name} 에 백업")
+    _restart_soon()
+    return render_template("restarting.html", names=", ".join(done) + f" — 직전 상태는 {before.name} 로 백업해 뒀어요",
+                           title="복구했습니다 ✅")
+
+
+@app.get("/api/remote_backups")
+@login_required
+def api_remote_backups():
+    from trader import remote
+    try:
+        return jsonify(names=remote.listing(settings_io.read(CONFIG_PATH))[:30])
+    except Exception as e:  # noqa: BLE001
+        return jsonify(error=str(e)[:200]), 502
+
+
 @app.post("/backup/test")
 @login_required
 def backup_test():

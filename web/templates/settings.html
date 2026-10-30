@@ -316,8 +316,55 @@
   <div class="mute" style="margin-top:6px">원격 저장을 켜면 백업할 때마다 그곳에도 올리고, 보관 기간이 지난 원격 백업도 정리해요.
     폴더가 없으면 만들어요. 올리기가 실패하면 알림을 보내고, 서버 쪽 백업은 그대로 남아요.
     시놀로지는 WebDAV Server 패키지(https 5006) 또는 FTP 서비스를 켜면 돼요. 비밀번호는 <code>.env</code>에만 저장돼요.</div>
-  <div class="mute" style="margin-top:8px">복원: 서비스를 멈추고 zip 의 <code>data/journal.db</code>·<code>config.toml</code> 을 <code>/opt/ai-trader</code> 의 같은 위치에 덮어쓴 뒤 다시 시작하세요.
-    같은 서버 디스크에만 있으면 디스크가 망가질 때 함께 잃으니, 추가 저장 위치를 넣어 두는 걸 권해요.</div>
+  <details style="margin-top:14px"><summary><b>↩ 백업으로 되돌리기 (복구)</b></summary>
+    <form method="post" action="{{ url_for('backup_restore') }}" enctype="multipart/form-data" style="margin-top:8px"
+          onsubmit="return confirm('지금 기록·설정을 이 백업으로 되돌릴까요? (직전 상태는 자동으로 백업해 둬요)')">
+      <div class="grid2">
+        <div><label for="restore_name">서버에 있는 백업</label>
+          <select id="restore_name" name="name">
+            <optgroup label="이 서버">
+            {% for b in backups %}<option value="{{ b.name }}">{{ b.ts }} · {{ "{:,.0f}".format(b.size / 1024) }}KB</option>{% endfor %}
+            {% if not backups %}<option value="">없음</option>{% endif %}
+            </optgroup>
+            {% if rmt.type %}<optgroup label="{{ rmt_types[rmt.type].split(' ')[0] }} (원격)" id="remote_group"><option value="" disabled>불러오는 중…</option></optgroup>{% endif %}
+          </select></div>
+        <div><label for="restore_file">또는 zip 파일 올리기 (PC에 받아 둔 것)</label>
+          <input id="restore_file" name="file" type="file" accept=".zip"></div>
+        <div><label for="restore_pw">웹 비밀번호</label><input id="restore_pw" name="password" type="password" autocomplete="current-password"></div>
+        <div><label for="restore_phrase">확인 문구 — <b>복구</b> 입력</label><input id="restore_phrase" name="phrase" autocomplete="off" placeholder="복구"></div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--fg);font-size:13px">
+        <input type="checkbox" name="with_env" style="width:auto"> 백업에 .env 가 있으면 연결 정보(앱키·비밀번호)도 되돌리기</label>
+      <div class="row" style="margin-top:8px"><button class="btn danger">↩ 이 백업으로 복구</button></div>
+    </form>
+    {% if rmt.type %}
+    <script>
+    // 원격(NAS) 백업 목록은 펼칠 때 한 번 불러온다
+    (function () {
+      var g = document.getElementById('remote_group'), loaded = false;
+      var det = g && g.closest('details');
+      function load() {
+        if (loaded) return; loaded = true;
+        fetch('{{ url_for("api_remote_backups") }}').then(function (r) { return r.json(); }).then(function (d) {
+          g.innerHTML = '';
+          if (d.error) { g.innerHTML = '<option value="" disabled>불러오기 실패: ' + d.error.replace(/</g, '') + '</option>'; return; }
+          if (!d.names.length) { g.innerHTML = '<option value="" disabled>없음</option>'; return; }
+          d.names.forEach(function (n) {
+            var m = n.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/), o = document.createElement('option');
+            o.value = 'remote:' + n; o.textContent = m ? (m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5]) : n; g.appendChild(o);
+          });
+        }).catch(function () { g.innerHTML = '<option value="" disabled>불러오기 실패</option>'; });
+      }
+      if (det) det.addEventListener('toggle', function () { if (det.open) load(); });
+    })();
+    </script>
+    {% endif %}
+    <div class="mute" style="margin-top:6px">매매 기록·설정·실행 모드·패스키를 되돌려요. 되돌리기 전에 지금 상태를 자동으로 백업하고,
+      백업 파일이 이 프로그램 것이 맞는지·기록이 손상되지 않았는지 먼저 확인해요. 끝나면 웹이 10초쯤 다시 시작돼요.
+      (증권사 계좌의 실제 주식·현금은 바뀌지 않아요 — 봇의 기록만 되돌립니다)</div>
+  </details>
+  <div class="mute" style="margin-top:8px">같은 서버 디스크에만 있으면 디스크가 망가질 때 함께 잃으니, 원격 저장이나 추가 저장 위치를 권해요.
+    서버를 새로 설치했다면: 설치 → <code>run.py passwd</code> → 웹 로그인 → 여기서 zip 올려 복구.</div>
 </div>
 
 <div class="card sec" id="update" data-sum="v{{ app_version }}{{ (' → 새 버전 v' ~ upd.latest) if upd and upd.behind }}">

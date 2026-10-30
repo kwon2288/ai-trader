@@ -176,3 +176,33 @@ def test(raw: dict) -> str:
         _dav_upload(st, name, b"ok")
         _dav_delete(st, [name])
     return "연결 성공 — 테스트 파일을 올렸다가 지웠어요"
+
+
+def listing(raw: dict) -> list[str]:
+    """원격에 있는 백업 파일 이름 (최신 먼저)."""
+    st = settings(raw)
+    if not st["type"] or not st["url"]:
+        return []
+    names = _ftp_list(st) if st["type"] in ("ftp", "ftps") else _dav_list(st)
+    return sorted({n for n in names if NAME_RE.search(n)}, reverse=True)
+
+
+def download(raw: dict, name: str, dest: Path) -> Path:
+    if not NAME_RE.search(name):
+        raise ValueError("백업 파일 이름이 아닙니다")
+    st = settings(raw)
+    if st["type"] in ("ftp", "ftps"):
+        f = _ftp(st)
+        try:
+            with open(dest, "wb") as out:
+                f.retrbinary(f"RETR {name}", out.write)
+        finally:
+            f.quit()
+    elif st["type"] == "webdav":
+        r = _dav(st, "GET", _dav_base(st) + quote(name))
+        if r.status_code != 200:
+            raise RuntimeError(f"WebDAV 내려받기 실패 {r.status_code}")
+        Path(dest).write_bytes(r.content)
+    else:
+        raise RuntimeError("원격 저장이 꺼져 있습니다")
+    return Path(dest)

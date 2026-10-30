@@ -59,6 +59,9 @@ def test_real_ftp_and_webdav_if_available():
             (d / "ai-trader-20000101-000000.zip").write_bytes(b"old")
             assert "정리" in remote.upload(raw, f, 14)
             assert sorted(p.name for p in d.iterdir()) == [f.name], t
+            assert remote.listing(raw) == [f.name]
+            got = remote.download(raw, f.name, root / f"dl-{t}.zip")
+            assert got.read_bytes() == b"PK"
     finally:
         os.environ.pop("BACKUP_REMOTE_PASSWORD", None)
         ws.stop()
