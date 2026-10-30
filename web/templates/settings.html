@@ -80,7 +80,7 @@
   </label>
   <div class="mute" style="margin-top:6px">증권사: <b>{{ {'nh':'NH 나무','kis':'한국투자','toss':'토스'}.get(us_broker, us_broker) }}</b>
     · 손절·익절·확신도·최소 보유일은 국내 설정을 함께 씁니다.
-    · 자동 실행은 <code>ai-trader-us.timer</code> (뉴욕 10:30·15:00)</div>
+    · 자동 실행은 <code>ai-trader-us.timer</code> (시각은 아래 ‘자동 실행 시각’)</div>
   <div class="grid2">
   {% for key, label, val in us_fields %}
     <div><label for="us_{{ key }}">{{ label }}</label>
@@ -148,6 +148,22 @@
     모드는 다음 실행부터 적용돼요. 바꿀 때 증권사 연결을 먼저 확인하므로 10초쯤 걸릴 수 있어요.
     {% if not web_live %}<br>웹에서 실계좌 전환은 꺼져 있어요 (.env 의 <code>WEB_LIVE_SWITCH=off</code>).{% endif %}
   </div>
+</div>
+
+<div class="card" id="schedule">
+  <h2>자동 실행 시각</h2>
+  <form method="post" action="{{ url_for('schedule_save') }}">
+    <div class="grid2">
+      <div><label for="sched_kr">🇰🇷 국내 — 한국시간 (09:10~15:10)</label>
+        <input id="sched_kr" name="sched_kr" value="{{ sched.kr }}" placeholder="09:30, 12:00, 14:30"></div>
+      <div><label for="sched_us">🇺🇸 미국 — 뉴욕시간 (09:40~15:50)</label>
+        <input id="sched_us" name="sched_us" value="{{ sched.us }}" placeholder="10:00, 12:30, 15:00"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn">저장하고 타이머에 적용</button></div>
+  </form>
+  <div class="mute" style="margin-top:8px">평일만, 쉼표로 구분해 하루 1~6번 (간격 30분 이상). 저장하면 서버 타이머에 바로 적용돼요.
+    미국은 뉴욕 시간 기준이라 서머타임이 자동 반영돼요 (뉴욕 10:00 = 한국 23:00/00:00).
+    횟수를 늘리면 AI 호출과 주문 기회가 늘어요 — 하루 주문 한도는 ‘예산 · 위험관리’에서.</div>
 </div>
 
 <div class="card" id="notify">

@@ -41,7 +41,7 @@
 
 {% macro log_item(l) %}
 <details>
-  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ '🇺🇸 ' if l.mode and l.mode.endswith('_us') }}{{ {'trade':'매매','analyze':'분석','scan':'종목검색','mode':'모드 변경','env':'연결 정보','update':'업데이트','passkey':'패스키'}.get(l.kind, l.kind) }}
+  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ '🇺🇸 ' if l.mode and l.mode.endswith('_us') }}{{ {'trade':'매매','analyze':'분석','scan':'종목검색','mode':'모드 변경','env':'연결 정보','update':'업데이트','passkey':'패스키','schedule':'실행 시각'}.get(l.kind, l.kind) }}
     · {{ {'timer':'자동','web':'웹','cli':'명령줄'}.get(l.source, l.source) }}</summary>
   <pre>{{ l.output }}</pre>
 </details>

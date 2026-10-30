@@ -62,6 +62,8 @@ def read(path: Path) -> dict:
 
 
 def _fmt(v) -> str:
+    if isinstance(v, list):
+        return "[" + ", ".join(_fmt(x) for x in v) + "]"
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, int):

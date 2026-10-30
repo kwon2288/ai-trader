@@ -41,7 +41,14 @@ def _inject_version():
     from trader import __version__
     return {"app_version": __version__}
 CONFIG_PATH = cfgmod.ensure_config()
-SCHEDULE = [(10, 0), (14, 30)]  # deploy/ai-trader.timer 와 동일
+def _sched(market: str) -> list[tuple[int, int]]:
+    """자동 실행 시각 (config.toml [schedule], 없으면 기본값) — ‘다음 실행’ 표시용."""
+    from trader import schedule
+    try:
+        raw = settings_io.read(CONFIG_PATH)
+    except Exception:  # noqa: BLE001
+        raw = {}
+    return schedule.as_tuples(schedule.times(raw, market))
 
 
 def cfg():
@@ -159,7 +166,6 @@ def logout():
 
 
 # ── 화면 ───────────────────────────────────────────────
-US_SCHEDULE = [(10, 30), (15, 0)]  # deploy/ai-trader-us.timer 와 동일 (뉴욕 시간)
 ET = ZoneInfo("America/New_York")
 
 
@@ -169,7 +175,7 @@ def next_run_us(now: datetime) -> datetime:
         day = n.date() + timedelta(days=d)
         if day.weekday() >= 5:
             continue
-        for h, m in US_SCHEDULE:
+        for h, m in _sched("us"):
             t = datetime(day.year, day.month, day.day, h, m, tzinfo=ET)
             if t > n:
                 return t.astimezone(KST)
@@ -194,7 +200,7 @@ def next_run(now: datetime) -> datetime:
         day = now.date() + timedelta(days=d)
         if day.weekday() >= 5:
             continue
-        for h, m in SCHEDULE:
+        for h, m in _sched("kr"):
             t = datetime(day.year, day.month, day.day, h, m, tzinfo=KST)
             if t > now:
                 return t
@@ -354,6 +360,8 @@ def settings():
                            env_groups=_env_view(), web_env=_web_env_edit(),
                            upd=__import__("trader.updater", fromlist=["x"]).last_check(cfg().data_dir),
                            web_update=_web_update(),
+                           sched={mk: ", ".join(__import__("trader.schedule", fromlist=["x"]).times(raw, mk))
+                                  for mk in ("kr", "us")},
                            notify_kinds=__import__("trader.notify", fromlist=["x"]).KINDS,
                            notify_on={k: __import__("trader.notify", fromlist=["x"]).enabled(cfg(), k)
                                       for k in __import__("trader.notify", fromlist=["x"]).KINDS},
@@ -635,6 +643,34 @@ def _public_base() -> str:
     local = h in ("localhost", "127.0.0.1") or h.replace(".", "").isdigit()
     proto = request.headers.get("X-Forwarded-Proto") or ("http" if local else "https")
     return f"{proto}://{host}"
+
+
+@app.post("/schedule")
+@login_required
+def schedule_save():
+    from trader import schedule
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    new, errs = {}, []
+    for mk in ("kr", "us"):
+        ts, err = schedule.parse(request.form.get(f"sched_{mk}", ""), mk)
+        if err:
+            errs.append(err)
+        new[mk] = ts
+    if errs:
+        for e in errs:
+            flash(e, "err")
+        return redirect(url_for("settings") + "#schedule")
+    old = settings_io.read(CONFIG_PATH)
+    for mk in ("kr", "us"):
+        text = settings_io._set(text, "schedule", mk, new[mk])
+    CONFIG_PATH.write_text(text, encoding="utf-8")
+    for mk in ("kr", "us"):
+        if schedule.times(old, mk) != new[mk]:
+            name = "국내" if mk == "kr" else "미국"
+            flash(f"{name} 자동 실행: {', '.join(new[mk])} — {schedule.apply(mk, new[mk])}", "ok")
+    c = cfg()
+    Journal(c.db_path).add_log(c.ledger, "schedule", "web", f"자동 실행 시각: 국내 {new['kr']} / 미국 {new['us']}")
+    return redirect(url_for("settings") + "#schedule")
 
 
 @app.post("/notify/save")

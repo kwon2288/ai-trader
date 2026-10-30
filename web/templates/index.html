@@ -19,7 +19,7 @@
     {% else %}<span class="badge b-ok">● 자동 실행 대기</span>{% endif %}
   </div>
   <div class="mute" style="margin-top:6px">
-    다음 자동 실행 {{ next_run }}{% if market == 'us' %} (한국시간 · 뉴욕 10:30/15:00){% endif %}
+    다음 자동 실행 {{ next_run }}{% if market == 'us' %} (한국시간){% endif %} · <a href="{{ url_for('settings') }}#schedule" class="mute">시각 바꾸기</a>
     {% if stopped or halted %} — 정지 상태라 건너뜁니다{% endif %}
   </div>
 </div>

@@ -102,7 +102,7 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
 
 
 def _daily_summary(cfg: Config, j: Journal) -> None:
-    """그날 마지막 정기 실행(국내 14시 이후 / 미국 뉴욕 14시 이후) 뒤 하루 요약 알림. 하루 한 번만."""
+    """그날 마지막 정기 실행(설정한 자동 실행 시각 중 마지막) 뒤 하루 요약 알림. 하루 한 번만."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
     from . import ledger, notify
@@ -111,7 +111,15 @@ def _daily_summary(cfg: Config, j: Journal) -> None:
     tz = ZoneInfo("America/New_York" if cfg.market == "us" else "Asia/Seoul")
     now = datetime.now(tz)
     key = f"daily_sent_{cfg.ledger}"
-    if now.hour < 14 or j.get(key) == now.date().isoformat():
+    from . import schedule
+    from .config import ensure_config
+    import tomllib
+    try:
+        last = schedule.as_tuples(schedule.times(tomllib.loads(ensure_config().read_text(encoding="utf-8")),
+                                                 cfg.market))[-1]
+    except Exception:  # noqa: BLE001
+        last = (14, 0)
+    if (now.hour, now.minute) < (last[0], max(0, last[1] - 5)) or j.get(key) == now.date().isoformat():
         return
     j.set(key, now.date().isoformat())
     snap = j.snapshot(cfg.ledger) or {}

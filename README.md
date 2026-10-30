@@ -131,7 +131,7 @@ python3 -m venv .venv
 
 **권장 일정:** dry 며칠 → mock 최소 4주 → 결과가 납득될 때만 live
 
-### 4. 자동 실행 (평일 10:00, 14:30 KST)
+### 4. 자동 실행 (기본 평일 10:00, 14:30 KST — 웹 설정 → 자동 실행 시각에서 변경)
 
 ```bash
 sudo cp deploy/ai-trader.service deploy/ai-trader.timer /etc/systemd/system/
@@ -141,7 +141,7 @@ systemctl list-timers ai-trader.timer      # 다음 실행 시각
 journalctl -u ai-trader -n 50              # 최근 실행 결과
 ```
 
-실행 시각은 `deploy/ai-trader.timer`에서 바꿀 수 있습니다. 바꿨다면 `web/app.py`의 `SCHEDULE`도 맞춰 주세요(웹의 ‘다음 실행’ 표시용).
+실행 시각은 웹 **설정 → 자동 실행 시각**에서 바꾸면 타이머에 바로 적용됩니다(하루 1~6번).
 
 ### 5. 웹 관리 화면
 
@@ -308,7 +308,7 @@ bash deploy/update.sh      # git pull → 패키지 설치 → 웹 화면 재시
 | 공유 설정 | 손절·익절·최대 손실·최소 확신도·최소 보유일·AI 선택·하이브리드는 국내와 같은 값 사용 |
 | 종목 | `[us] symbols` 티커 목록 (미국은 자동 선정 없음). 종목당 한도보다 비싼 종목은 매수 제외 — 소수점 매수 안 함 |
 | 주문 | 기본 지정가(호가 기준). NH는 `margin_currency = "krw"`면 **원화로 바로 주문**(환전 불필요) |
-| 실행 시각 | 뉴욕 평일 10:30·15:00 (한국시간 밤, 서머타임 자동 반영) |
+| 실행 시각 | 기본 뉴욕 평일 10:30·15:00 (한국시간 밤, 서머타임 자동 반영) — 웹 설정에서 변경 |
 
 ```bash
 .venv/bin/python run.py check --market us        # 미국 연결 확인
