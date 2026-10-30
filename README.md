@@ -161,7 +161,7 @@ sudo systemctl enable --now ai-trader-web
 
 <p align="center"><img src="docs/screenshot-settings.png" width="420" alt="설정 화면"></p>
 
-- **Face ID 로그인**: 설정 → 보안 → ‘이 기기를 Face ID로 등록’ (https 도메인 접속에서만).
+- **패스키 로그인**: 설정 → 보안 → ‘이 기기에 패스키 등록’ (https 도메인 접속에서만). 아이폰은 Face ID로 확인.
 - **연결 정보** 는 저장할 때 웹 비밀번호를 다시 묻고, 넣은 값은 화면에 다시 보여 주지 않습니다(앱키는 끝 4자리만).
   빈칸은 그대로 두고, `.env` 는 `.env.bak` 으로 백업한 뒤 웹이 자동으로 다시 시작됩니다(10초).
 - 웹에서 못 바꾸는 것: `I_UNDERSTAND_REAL_MONEY`, `WEB_LIVE_SWITCH`, `WEB_ENV_EDIT`, 포트. 연결 정보 변경 자체를 막으려면 `.env` 에 `WEB_ENV_EDIT=off`.

@@ -3,7 +3,7 @@
 <div class="card" style="max-width:360px;margin:40px auto">
   <h2>로그인</h2>
   {% if has_passkeys %}
-  <button class="btn pri" id="pkbtn" style="width:100%;display:none" type="button">🔐 Face ID로 로그인</button>
+  <button class="btn pri" id="pkbtn" style="width:100%;display:none" type="button">🔑 패스키로 로그인</button>
   <div class="mute" id="pkmsg" style="margin:8px 0 4px;min-height:1em"></div>
   {% endif %}
   <form method="post">
@@ -18,7 +18,7 @@
 <script>
 (function () {
   var b = document.getElementById('pkbtn'), m = document.getElementById('pkmsg');
-  if (!PK.supported()) { m.textContent = window.isSecureContext ? '' : 'Face ID 로그인은 https 주소에서만 돼요.'; return; }
+  if (!PK.supported()) { m.textContent = window.isSecureContext ? '' : '패스키 로그인은 https 주소에서만 돼요.'; return; }
   b.style.display = 'block';
   b.addEventListener('click', async function () {
     b.disabled = true; m.textContent = '';

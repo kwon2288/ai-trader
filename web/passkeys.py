@@ -1,7 +1,7 @@
-"""패스키(Face ID / Touch ID) 로그인 — WebAuthn.
+"""패스키 로그인 — WebAuthn (기기에서 Face ID·Touch ID 등으로 확인).
 
-- 등록: 로그인한 상태에서 설정 → 보안 → ‘이 기기를 Face ID로 등록’ (웹 비밀번호 재입력)
-- 로그인: 로그인 화면의 ‘Face ID로 로그인’
+- 등록: 로그인한 상태에서 설정 → 보안 → ‘이 기기에 패스키 등록’ (웹 비밀번호 재입력)
+- 로그인: 로그인 화면의 ‘패스키로 로그인’
 - 저장: data/passkeys.json (공개키만 저장 — 서버가 털려도 로그인 수단이 되지 않음)
 - HTTPS(또는 localhost)에서만 동작. http://<IP>:8080 으로는 브라우저가 막는다.
 """
@@ -55,7 +55,7 @@ def rp_and_origin(host: str, origin_header: str | None) -> tuple[str, str]:
     if not o.hostname or o.hostname.lower() != rp_id:
         raise ValueError("접속 주소가 맞지 않습니다")
     if o.scheme != "https" and rp_id not in ("localhost", "127.0.0.1"):
-        raise ValueError("Face ID 로그인은 https 주소에서만 됩니다")
+        raise ValueError("패스키 로그인은 https 주소에서만 됩니다")
     return rp_id, f"{o.scheme}://{o.netloc}"
 
 

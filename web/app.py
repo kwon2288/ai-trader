@@ -515,7 +515,7 @@ def change_env():
     return render_template("restarting.html", names=names)
 
 
-# ── 패스키 (Face ID / Touch ID) ─────────────────────────
+# ── 패스키 로그인 ─────────────────────────────────────
 def _pk_ctx():
     from web import passkeys
     return passkeys.rp_and_origin(request.host, request.headers.get("Origin"))
@@ -553,7 +553,7 @@ def passkey_login_verify():
                               chal, rp_id, origin)
     except Exception as e:  # noqa: BLE001
         time.sleep(1.0)
-        return _json_err(f"Face ID 로그인 실패: {e}", 403)
+        return _json_err(f"패스키 로그인 실패: {e}", 403)
     session.clear()
     session["ok"] = True
     session.permanent = True
@@ -591,7 +591,7 @@ def passkey_register_verify():
     except Exception as e:  # noqa: BLE001
         return _json_err(f"등록 실패: {e}")
     c = cfg()
-    Journal(c.db_path).add_log(c.ledger, "passkey", "web", f"Face ID(패스키) 등록: {item['name']}")
+    Journal(c.db_path).add_log(c.ledger, "passkey", "web", f"패스키 등록: {item['name']}")
     return jsonify(ok=True, name=item["name"])
 
 
@@ -604,7 +604,7 @@ def passkey_delete():
         flash("웹 비밀번호가 맞지 않습니다.", "err")
     elif passkeys.remove(cfg().data_dir, request.form.get("id", "")):
         c = cfg()
-        Journal(c.db_path).add_log(c.ledger, "passkey", "web", "Face ID(패스키) 삭제")
+        Journal(c.db_path).add_log(c.ledger, "passkey", "web", "패스키 삭제")
         flash("삭제했습니다.", "ok")
     return redirect(url_for("settings") + "#security")
 

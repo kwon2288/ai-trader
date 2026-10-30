@@ -151,8 +151,8 @@
 </div>
 
 <div class="card" id="security">
-  <h2>보안 — Face ID 로그인</h2>
-  <div class="mute">아이폰 Face ID·맥 Touch ID 같은 <b>패스키</b>로 비밀번호 없이 로그인해요. 기기마다 한 번 등록하면 돼요.</div>
+  <h2>보안 — 패스키 로그인</h2>
+  <div class="mute"><b>패스키</b>로 비밀번호 없이 로그인해요. 기기에서 Face ID·Touch ID·화면 잠금으로 확인합니다. 기기마다 한 번 등록하면 돼요.</div>
   {% if passkey_list %}
   <div class="scroll" style="margin-top:8px"><table>
     <tr><th>이름</th><th>등록</th><th>마지막 사용</th><th></th></tr>
@@ -171,7 +171,7 @@
       <div><label for="pk_name">이 기기 이름</label><input id="pk_name" value="" placeholder="예: 내 아이폰" maxlength="40"></div>
       <div><label for="pk_pw">웹 비밀번호 다시 입력</label><input id="pk_pw" type="password" autocomplete="current-password"></div>
     </div>
-    <div class="row" style="margin-top:10px"><button class="btn pri" id="pk_btn" type="button">🔐 이 기기를 Face ID로 등록</button></div>
+    <div class="row" style="margin-top:10px"><button class="btn pri" id="pk_btn" type="button">🔑 이 기기에 패스키 등록</button></div>
     <div class="mute" id="pk_msg" style="margin-top:6px"></div>
   </div>
   <div class="mute" style="margin-top:8px">https 주소(예: 도메인으로 접속)에서만 돼요. 등록하면 서버엔 공개키만 저장되고,
@@ -186,11 +186,11 @@
   if (!PK.supported()) { b.disabled = true;
     m.textContent = window.isSecureContext ? '이 브라우저는 패스키를 지원하지 않아요.' : '지금은 http 주소라 등록할 수 없어요. https 도메인으로 접속하세요.'; return; }
   b.addEventListener('click', async function () {
-    b.disabled = true; m.textContent = '등록 중… Face ID를 확인하세요';
+    b.disabled = true; m.textContent = '등록 중… 기기에서 확인해 주세요';
     try {
       var d = await PK.register('{{ url_for("passkey_register_options") }}', '{{ url_for("passkey_register_verify") }}',
                                 document.getElementById('pk_pw').value, n.value);
-      m.textContent = '✅ ' + d.name + ' 등록 완료 — 다음부터 로그인 화면에서 Face ID로 들어갈 수 있어요.';
+      m.textContent = '✅ ' + d.name + ' 등록 완료 — 다음부터 로그인 화면에서 패스키로 들어갈 수 있어요.';
       setTimeout(function () { location.reload(); }, 1500);
     } catch (e) { m.textContent = '❌ ' + PK.why(e); b.disabled = false; }
   });
