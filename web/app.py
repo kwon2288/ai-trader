@@ -392,7 +392,8 @@ def usage():
                       "left_days": left_days,
                       "empty_date": (today + timedelta(days=int(left_days))).isoformat() if left_days is not None
                       and left_days < 3650 else None}
-    models = sorted({r["model"] for r in j.usage(None)} | set(c.ai_models.values()))
+    models = sorted({r["model"] for r in j.usage(None)} | set(c.ai_models.values()) | set(pricing.PRICES)
+                    | set(st["prices"]), key=lambda m: (pricing.provider_of(m) or "z", m))
     # 모델 바꾸기: 최근 하루 평균 토큰(AI별, 기록 없으면 다른 AI 평균)으로 모델마다 한 달 예상 비용
     tok = {}
     for prov in PROVIDERS:
@@ -401,7 +402,7 @@ def usage():
     known = [t for t in tok.values() if t]
     fallback = (sum(t[0] for t in known) / len(known), sum(t[1] for t in known) / len(known)) if known else (6000, 900)
     choices = []
-    for key, label, opts in settings_io.MODEL_FIELDS:
+    for key, label, opts in pricing.model_options(settings_io.MODEL_FIELDS, st):
         prov = key.split("_")[0]
         ti, to = tok.get(prov) or fallback
         cur = c.ai_models.get(prov)
@@ -415,7 +416,8 @@ def usage():
     return render_template("usage.html", c=c, p=p, summ=summ, proj=proj, st=st, days=days,
                            choices=choices, providers=settings_io.PROVIDER_CHOICES,
                            keys={pv: available(pv) for pv in PROVIDERS},
-                           models=[(m, pricing.price(m, st), m in st["prices"]) for m in models], today=today)
+                           models=[(m, pricing.price(m, st), m in st["prices"], m in pricing.PRICES,
+                                    m in c.ai_models.values()) for m in models], today=today)
 
 
 @app.post("/usage/models")
@@ -465,15 +467,31 @@ def usage_settings():
             st["credits"][prov] = {"amount": amt, "since": since or datetime.now(KST).date().isoformat()}
         else:
             st["credits"].pop(prov, None)
+    import re as _re
     for k in f:
         if k.startswith("pin_"):
             m = k[4:]
+            if f.get("del_" + m):
+                st["prices"].pop(m, None)
+                continue
             pi, po = num(k, 0, 500), num("pout_" + m, 0, 2000)
             default = pricing.PRICES.get(m)
             if pi is not None and po is not None and (pi, po) != default:
                 st["prices"][m] = [pi, po]
             elif default is not None or pi is None:
                 st["prices"].pop(m, None)
+    nm = (f.get("new_model") or "").strip().lower()
+    if nm:
+        ni, no = num("new_in", 0, 500), num("new_out", 0, 2000)
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9.\-]{2,60}", nm):
+            flash("모델 ID 형식이 올바르지 않습니다 (예: claude-haiku-6)", "err")
+        elif ni is None or no is None:
+            flash("새 모델의 입력·출력 단가를 숫자로 넣으세요.", "err")
+        else:
+            st["prices"][nm] = [ni, no]
+            prov = pricing.provider_of(nm)
+            flash(f"모델 추가: {nm} (입력 ${ni:g} / 출력 ${no:g})"
+                  + ("" if prov else " — 이름이 claude-/gemini-/gpt- 로 시작하지 않아 모델 선택 목록엔 안 나와요"), "ok")
     pricing.save(c.data_dir, st)
     flash("저장했습니다.", "ok")
     return redirect(url_for("usage"))
@@ -520,7 +538,8 @@ def settings():
                            env_mode=os.environ.get("TRADING_MODE", "dry").strip().lower(), raw=raw, auto_fields=auto_fields,
                            us_fields=us_fields, us=us_raw, us_broker=us_broker,
                            order_types=settings_io.ORDER_TYPES, providers=settings_io.PROVIDER_CHOICES,
-                           model_fields=settings_io.MODEL_FIELDS,
+                           model_fields=__import__("trader.pricing", fromlist=["x"]).model_options(
+                               settings_io.MODEL_FIELDS, __import__("trader.pricing", fromlist=["x"]).settings(cfg().data_dir)),
                            keys={p: available(p) for p in PROVIDERS},
                            key_labels={p: i["label"] for p, i in PROVIDERS.items()})
 

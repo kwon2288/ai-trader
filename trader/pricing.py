@@ -58,3 +58,25 @@ def cost(provider: str, model: str, tin: int, tout: int, st: dict) -> float | No
     if p is None:
         return None
     return tin / 1e6 * p[0] + tout / 1e6 * p[1]
+
+
+def provider_of(model: str) -> str | None:
+    m = model.lower()
+    if m.startswith("claude"):
+        return "claude"
+    if m.startswith("gemini"):
+        return "gemini"
+    if m.startswith(("gpt", "o1", "o3", "o4", "o5", "chatgpt")):
+        return "openai"
+    return None
+
+
+def model_options(fields: list, st: dict) -> list:
+    """설정 화면 모델 목록(MODEL_FIELDS)에 단가표에서 직접 추가한 모델을 덧붙인다."""
+    out = []
+    for key, label, opts in fields:
+        prov = key.split("_")[0]
+        have = {v for v, _ in opts}
+        extra = [(m, f"{m} · 직접 추가") for m in sorted(st.get("prices", {})) if provider_of(m) == prov and m not in have]
+        out.append((key, label, list(opts) + extra))
+    return out

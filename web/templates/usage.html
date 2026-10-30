@@ -101,12 +101,21 @@
     </div>
     <h3 style="margin:14px 0 4px;font-size:14px">모델 단가 (100만 토큰당 $, 입력 / 출력)</h3>
     <div class="scroll"><table>
-      {% for m, pr, custom in models %}
-      <tr><td>{{ m }}{% if custom %} <span class="badge">직접 입력</span>{% endif %}</td>
-        <td><input name="pin_{{ m }}" value="{{ '%g'|format(pr[0]) if pr else '' }}" placeholder="입력" inputmode="decimal" style="width:80px"></td>
-        <td><input name="pout_{{ m }}" value="{{ '%g'|format(pr[1]) if pr else '' }}" placeholder="출력" inputmode="decimal" style="width:80px"></td></tr>
+      <tr><th>모델</th><th>입력</th><th>출력</th><th></th></tr>
+      {% for m, pr, custom, builtin, inuse in models %}
+      <tr><td>{{ m }}
+          {% if inuse %}<span class="badge b-ok">사용 중</span>{% endif %}
+          {% if custom and builtin %}<span class="badge">단가 수정</span>{% elif custom %}<span class="badge">직접 추가</span>{% endif %}</td>
+        <td><input name="pin_{{ m }}" value="{{ '%g'|format(pr[0]) if pr else '' }}" placeholder="입력" inputmode="decimal" style="width:72px"></td>
+        <td><input name="pout_{{ m }}" value="{{ '%g'|format(pr[1]) if pr else '' }}" placeholder="출력" inputmode="decimal" style="width:72px"></td>
+        <td class="nw">{% if custom %}<label style="font-size:12px;display:flex;gap:4px;align-items:center">
+          <input type="checkbox" name="del_{{ m }}" style="width:auto">{{ '기본값으로' if builtin else '삭제' }}</label>{% endif %}</td></tr>
       {% endfor %}
+      <tr><td><input name="new_model" placeholder="새 모델 ID 추가 (예: claude-haiku-6)" autocomplete="off" spellcheck="false"></td>
+        <td><input name="new_in" placeholder="입력" inputmode="decimal" style="width:72px"></td>
+        <td><input name="new_out" placeholder="출력" inputmode="decimal" style="width:72px"></td><td></td></tr>
     </table></div>
+    <div class="mute" style="margin-top:4px">새로 추가한 모델(claude-·gemini-·gpt- 로 시작)은 위 ‘AI · 모델 바꾸기’와 설정 → AI 의 모델 목록에도 나타나요.</div>
     <div class="row" style="margin-top:10px"><button class="btn pri">저장</button></div>
   </form>
   <div class="mute" style="margin-top:8px">기본 단가는 2026년 10월 조사값이에요 (원화는 $1=1,400원으로 대략 환산). 가격이 바뀌면 여기서 고치세요.</div>

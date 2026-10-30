@@ -69,6 +69,23 @@ def test_change_models_from_usage_page():
         W.CONFIG_PATH = old
 
 
+def test_add_and_delete_model_price():
+    from web.app import app
+    c = cfgmod.load()
+    cl = app.test_client()
+    with cl.session_transaction() as s:
+        s["ok"] = True
+    cl.post("/usage/settings", data={"budget": "5", "new_model": "claude-haiku-6", "new_in": "0.05", "new_out": "0.25"})
+    st = pricing.settings(c.data_dir)
+    assert st["prices"]["claude-haiku-6"] == [0.05, 0.25]
+    h = cl.get("/usage").get_data(as_text=True)
+    assert "claude-haiku-6 · 직접 추가" in h and "gpt-6-astra" in h      # 모델 목록·전체 단가표
+    assert "claude-haiku-6" in cl.get("/settings").get_data(as_text=True)
+    cl.post("/usage/settings", data={"budget": "5", "pin_claude-haiku-6": "0.05", "pout_claude-haiku-6": "0.25",
+                                     "del_claude-haiku-6": "on"})
+    assert "claude-haiku-6" not in pricing.settings(c.data_dir)["prices"]
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
