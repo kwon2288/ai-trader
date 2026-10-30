@@ -11,7 +11,7 @@
     <a class="mute" href="{{ url_for('settings') }}#mode" style="font-size:12px">모드 바꾸기</a>
     <span class="badge">🏦 {{ {'nh':'NH 나무','kis':'한국투자','toss':'토스'}.get(broker, broker) }}</span>
     {% if broker == 'toss' and c.mode == 'mock' %}<a class="badge b-err" href="{{ url_for('settings') }}#mode">⚠ 토스는 모의투자 없음 → 모드 바꾸기</a>{% endif %}
-    <span class="badge">🧠 {{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT','consensus':'다수결','rules':'규칙만'}.get(c.ai_provider, c.ai_provider) }}{% if c.ai_hybrid and c.ai_provider != 'rules' %} + 규칙필터{% endif %}</span>
+    <span class="badge">🧠 {{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT','consensus':'다수결','rules':'규칙만'}.get(c.ai_provider, c.ai_provider) }}{% if c.ai_hybrid and c.ai_provider != 'rules' %} + 규칙필터{% endif %}{% if c.ai_news and c.ai_provider != 'rules' %} + 📰{% endif %}</span>
 
     {% if busy %}<span class="badge b-warn" id="busy">⏳ 실행 중…</span>
     {% elif halted %}<span class="badge b-err">🛑 손실 한도로 정지</span>

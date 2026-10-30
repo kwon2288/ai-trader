@@ -51,7 +51,9 @@ def compute(daily: list[dict]) -> dict:
 
     return {
         "close": last,
-        "ma5": r(ma5, 0), "ma20": r(ma20, 0), "ma60": r(ma60, 0),
+        # 국내(원)는 정수, 미국($)처럼 가격이 작으면 소수까지 — 반올림으로 추세 판단이 틀어지지 않게
+        "ma5": r(ma5, 0 if last >= 1000 else 4), "ma20": r(ma20, 0 if last >= 1000 else 4),
+        "ma60": r(ma60, 0 if last >= 1000 else 4),
         "price_vs_ma20_pct": r((last / ma20 - 1) * 100) if ma20 else None,
         "ma5_above_ma20": (ma5 > ma20) if (ma5 and ma20) else None,
         "rsi14": r(_rsi(closes)),

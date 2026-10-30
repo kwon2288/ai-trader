@@ -74,6 +74,29 @@ class NHUSBroker(NHBroker):
         bars.sort(key=lambda b: b["date"])
         return bars[-n:]
 
+    def history(self, code: str, days: int = 500) -> list[dict]:
+        """백테스트용 긴 일봉 — 끝 날짜를 옮겨 가며 받는다."""
+        from datetime import timedelta
+        out: dict[str, dict] = {}
+        end = datetime.now(ET)
+        for _ in range(8):
+            data = self._post("/gbstock/quote/v1/period", {
+                "iem_cd": code, "end_dt": end.strftime("%Y%m%d"), "count": str(min(days, 500)), "maxavg": "0",
+                "gubun": "3", "xtick": "0001", "today_cls": "0", "market_cls": "1"})
+            rows = data.get("Output_1") or []
+            got = 0
+            for r in rows:
+                d = str(r.get("trade_date") or r.get("bsop_date") or "")
+                if d and _num(r.get("close_prc")) > 0 and d not in out:
+                    out[d] = {"date": d, "open": _f(r.get("open_prc")), "high": _f(r.get("high")),
+                              "low": _f(r.get("low")), "close": _f(r.get("close_prc")), "volume": _num(r.get("movolume"))}
+                    got += 1
+            if not got or len(out) >= days:
+                break
+            end = datetime.strptime(min(out), "%Y%m%d").replace(tzinfo=ET) - timedelta(days=1)
+        bars = sorted(out.values(), key=lambda b: b["date"])
+        return bars[-days:] if bars else self.daily(code, min(days, 300))
+
     # ── 계좌 ──
     def _ensure_fx(self) -> float:
         """원화 증거금 금액을 달러로 바꾸려면 환율이 필요하다 → 아직 모르면 대표 종목 시세로 한 번 받아온다."""

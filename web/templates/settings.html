@@ -14,7 +14,7 @@
   </div>
 </div>
 
-<div class="card sec main-form" id="ai" data-sum="{{ providers.get(c.ai_provider, c.ai_provider) }}{{ ' + 규칙필터' if c.ai_hybrid and c.ai_provider != 'rules' }}">
+<div class="card sec main-form" id="ai" data-sum="{{ providers.get(c.ai_provider, c.ai_provider) }}{{ ' + 규칙필터' if c.ai_hybrid and c.ai_provider != 'rules' }}{{ ' + 뉴스·공시' if c.ai_news and c.ai_provider != 'rules' }}">
   <h2 class="sec-head">AI</h2>
   <label for="provider">판단에 쓸 AI</label>
   <select id="provider" name="provider">
@@ -27,6 +27,12 @@
     <span>규칙으로 먼저 거르기 (토큰 절약)
       <span class="mute" style="display:block">추세·과열 규칙이 매수/매도 신호를 찾은 종목만 AI에게 확인받고,
         신호가 없으면 AI를 부르지 않아요. ‘규칙만’을 고르면 이 설정과 상관없이 AI를 쓰지 않아요.</span></span>
+  </label>
+  <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;color:var(--fg)">
+    <input type="checkbox" name="news" style="width:auto;margin-top:3px" {{ 'checked' if c.ai_news }}>
+    <span>뉴스·공시도 함께 보내기
+      <span class="mute" style="display:block">AI에게 넘기는 종목마다 최근 3일 뉴스 제목(구글 뉴스)과 최근 7일 공시 제목(DART, 국내 · 키 필요)을 붙여요.
+        종목당 토큰이 조금 늘고(제목만 보냄), 실행이 몇 초 길어져요. DART 키는 연결 정보 → AI API 키에서.</span></span>
   </label>
   <div class="mute" style="margin-top:6px">
     API 키: {% for k, v in key_labels.items() %}{{ v }} {{ '✅' if keys[k] else '❌' }}{{ ' · ' if not loop.last }}{% endfor %}

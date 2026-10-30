@@ -5,7 +5,7 @@
 {{ market_tabs(base, market, 'pnl') }}
 {% set cur = c.currency %}
 <div class="card">
-  <h2>기간별 손익</h2>
+  <h2>기간별 손익 <a href="{{ url_for('backtest_page') }}" style="font-size:13px;font-weight:normal;float:right">🧪 백테스트 →</a></h2>
   <div class="pills">
     {% for k, v in periods %}<a href="{{ url_for('pnl', p=k) }}" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
   </div>
@@ -32,6 +32,16 @@
       {% if r.best %}<div class="mute">{{ r.best.name }} / {{ r.worst.name }}</div>{% endif %}</div>
   </div>
   {% if chart %}{{ chart|safe }}<div class="mute">{{ '월별' if monthly else '일별' }} 실현 손익</div>{% endif %}
+  {% if cmp %}
+  <h2 style="margin-top:16px">시장과 비교</h2>
+  <div class="stats">
+    <div class="stat"><div class="k">봇 (예산 대비)</div><div class="v">{{ pct(cmp.bot_pct) }}</div>
+      <div class="mute">실현 + 평가 손익 변화</div></div>
+    <div class="stat"><div class="k">{{ cmp.bench_name }}</div><div class="v">{% if cmp.bench_pct is not none %}{{ pct(cmp.bench_pct) }}{% else %}-{% endif %}</div>
+      <div class="mute">{% if cmp.bench_pct is not none %}{{ '봇이 지수보다 ' ~ ('%.2f'|format((cmp.bot_pct - cmp.bench_pct)|abs)) ~ '%p ' ~ ('앞섬 ✅' if cmp.bot_pct > cmp.bench_pct else '뒤처짐') }}{% elif cmp.bench_err %}지수 조회 실패{% else %}데이터 없음{% endif %}</div></div>
+  </div>
+  {% if cmp.chart %}{{ cmp.chart|safe }}<div class="mute"><span class="up">━</span> 봇 &nbsp; <span>┅</span> 지수를 예산만큼 사서 들고 있었다면</div>{% endif %}
+  {% endif %}
   {% if snap and snap.budget is defined %}
   <div class="mute" style="margin-top:8px">지금 보유 중인 봇 종목의 평가 손익 {{ ('+' if snap.unrealized >= 0 else '') ~ money(snap.unrealized, cur) }}는
     팔 때 실현 손익에 들어가요. 누적 봇 손익 {{ ('+' if snap.pnl >= 0 else '') ~ money(snap.pnl, cur) }} ({{ "%+.2f"|format(snap.pnl_pct) }}%)</div>

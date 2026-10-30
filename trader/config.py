@@ -47,6 +47,7 @@ class Config:
     auto_include_etf: bool = False
     auto_scan_pool: int = 200          # 시총 상위 몇 개를 시세 조회할지
     ai_hybrid: bool = False            # 규칙으로 먼저 거르고 신호 난 종목만 AI 확인 (토큰 절약)
+    ai_news: bool = False              # AI 에 최근 뉴스 제목·공시를 함께 보냄
     market: str = "kr"                 # kr | us — 시장마다 예산·장부·손실한도가 따로
     currency: str = "KRW"
     us: dict = field(default_factory=dict)   # [us] 섹션 원본
@@ -160,6 +161,7 @@ def load(config_path: Path | None = None) -> Config:
         },
         ai_max_tokens=int(a.get("max_tokens", 4000)),
         ai_hybrid=bool(a.get("hybrid", True)),
+        ai_news=bool(a.get("news", False)),
         symbols=[norm_symbol(s, "kr") for s in raw["universe"]["symbols"]],
         auto_count=int(raw["universe"].get("auto_count", 10)),
         auto_min_price=int(raw["universe"].get("auto_min_price", 1000)),

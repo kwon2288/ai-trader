@@ -11,7 +11,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
@@ -295,6 +295,30 @@ class NHBroker:
         } for r in rows if _int(r.get("stck_clpr")) > 0]
         out.sort(key=lambda r: r["date"])
         return out
+
+    def history(self, code: str, days: int = 500) -> list[dict]:
+        """백테스트용 긴 일봉 (오래된 → 최신). 기간별 시세를 끝 날짜를 옮겨 가며 여러 번 받는다."""
+        out: dict[str, dict] = {}
+        end = datetime.now(KST).strftime("%Y%m%d")
+        for _ in range(8):
+            data = self._post("/krstock/quote/v1/period", {
+                "market_cd": "KRX", "iem_cd": code, "edate": end, "array_cnt": str(min(days, 500)),
+                "maxavg": "0", "gubun": "1", "today_cls_code": "0", "fake_tick": "1", "view_main_yn": "Y"})
+            rows = data.get("Output_1") or []
+            got = 0
+            for r in rows:
+                d = _ymd(r.get("bsop_date"))
+                if d and _int(r.get("stck_prpr")) > 0 and d not in out:
+                    out[d] = {"date": d, "open": _int(r.get("stck_oprc")), "high": _int(r.get("stck_hgpr")),
+                              "low": _int(r.get("stck_lwpr")), "close": _int(r.get("stck_prpr")),
+                              "volume": _int(r.get("vol"))}
+                    got += 1
+            if not got or len(out) >= days:
+                break
+            first = min(out)
+            end = (datetime.strptime(first, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+        bars = sorted(out.values(), key=lambda b: b["date"])
+        return bars[-days:] if bars else self.daily(code, min(days, 300))
 
     # ── 계좌 ────────────────────────────────────────────
     def balance(self) -> Balance:

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import money, num, pct, market_tabs %}
+{% block title %}백테스트 · AI 자동매매{% endblock %}
+{% block body %}
+{{ market_tabs(base, market, 'backtest_page') }}
+{% set cur = c.currency %}
+<div class="card">
+  <h2>백테스트 — 지금 전략을 과거에 돌려 보기</h2>
+  <form method="post">
+    <div class="grid2">
+      <div><label for="days">기간</label>
+        <select id="days" name="days">
+          {% for d, l in [(250,'최근 1년'),(500,'최근 2년'),(750,'최근 3년')] %}
+          <option value="{{ d }}" {{ 'selected' if (r and r.params.days == d) or (not r and d == 500) }}>{{ l }}</option>{% endfor %}
+        </select></div>
+      <div><label for="stop">손절 (%)</label><input id="stop" name="stop" value="{{ r.params.stop if r else c.stop_loss_pct }}" inputmode="decimal"></div>
+      <div><label for="take">익절 (%)</label><input id="take" name="take" value="{{ r.params.take if r else c.take_profit_pct }}" inputmode="decimal"></div>
+      <div><label>예산 · 종목당 · 최대 보유</label>
+        <div class="mute" style="padding-top:8px">{{ money(c.total_krw, cur) }} · {{ money(c.max_per_position_krw, cur) }} · {{ c.max_positions }}종목 (설정값)</div></div>
+    </div>
+    <label for="symbols">종목 (비우면 설정의 {{ '미국' if market == 'us' else '핵심' }} 종목 {{ c.symbols|length }}개, 최대 40개)</label>
+    <textarea id="symbols" name="symbols" rows="2" placeholder="{{ c.symbols[:8]|join(', ') }} …">{{ (r.params.symbols|join(', ')) if r and r.params.symbols != c.symbols[:40] else '' }}</textarea>
+    <div class="row" style="margin-top:10px"><button class="btn pri" {{ 'disabled' if busy }}>🧪 백테스트 실행</button>
+      {% if busy and job.kind == 'backtest' %}<span class="badge b-warn" id="busy">⏳ 실행 중 {{ job.get('progress', '') }}</span>{% endif %}</div>
+  </form>
+  <div class="mute" style="margin-top:8px">AI 없이 <b>규칙 신호 + 손절·익절</b>만 시뮬레이션해요. 신호는 그날 종가로 판단해 다음 날 시가에 사고,
+    손절·익절은 장중 저가·고가로 확인해요. 수수료·세금 반영. 실제 봇은 AI가 한 번 더 걸러 매매가 더 적어요.</div>
+</div>
+
+{% if r %}
+<div class="card">
+  <h2>결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ r.start[:4] }}-{{ r.start[4:6] }}-{{ r.start[6:] }} ~ {{ r.end[:4] }}-{{ r.end[4:6] }}-{{ r.end[6:] }} · 손절 {{ r.stop }}% · 익절 +{{ r.take }}% · {{ r.symbols }}종목</span></h2>
+  <div class="stats">
+    <div class="stat"><div class="k">봇 전략 수익률</div><div class="v">{{ pct(r.return_pct) }}</div>
+      <div class="mute">{{ ('+' if r.pnl >= 0 else '') ~ num(r.pnl, cur) }}</div></div>
+    <div class="stat"><div class="k">{{ bench[1] }}</div><div class="v">{% if r.bench_pct is not none %}{{ pct(r.bench_pct) }}{% else %}-{% endif %}</div>
+      {% if r.bench_pct is not none %}<div class="mute">{{ '지수보다 나음 ✅' if r.return_pct > r.bench_pct else '지수보다 못함' }}</div>{% endif %}</div>
+    <div class="stat"><div class="k">최대 낙폭</div><div class="v"><span class="down">{{ "%.2f"|format(r.mdd_pct) }}%</span></div></div>
+    <div class="stat"><div class="k">거래 · 승률</div><div class="v">{{ r.n }}회</div>
+      <div class="mute">승률 {{ r.win_rate if r.win_rate is not none else '-' }}% · 평균 {{ r.avg_win or 0 }}% / {{ r.avg_loss or 0 }}%</div></div>
+  </div>
+  {% if chart %}{{ chart|safe }}
+  <div class="mute"><span class="up">━</span> 봇 전략 &nbsp; <span>┅</span> {{ bench[1] }}을 같은 금액으로 사서 보유</div>{% endif %}
+  <div class="mute" style="margin-top:6px">{{ r.ts[5:16].replace('T', ' ') }} 실행 · {{ r.seconds }}초 · 끝날 때 보유 중 {{ r.open_positions }}종목</div>
+</div>
+
+<div class="card sec" id="bt-trades" data-sum="{{ r.n }}회 — 눌러서 보기">
+  <h2 class="sec-head">거래 내역</h2>
+  {% if r.trades %}
+  <div class="scroll"><table>
+    <tr><th>종목</th><th>기간</th><th class="r">매수 → 매도</th><th class="r">손익</th></tr>
+    {% for t in r.trades[:200] %}
+    <tr><td>{{ t.name }}<div class="mute">{{ t.why }}</div></td>
+      <td class="nw">{{ t.buy_date[2:4] }}.{{ t.buy_date[4:6] }}.{{ t.buy_date[6:] }}<div class="mute">~{{ t.sell_date[4:6] }}.{{ t.sell_date[6:] }}</div></td>
+      <td class="r nw">{{ num(t.buy, cur) }}<div class="mute">→ {{ num(t.sell, cur) }}</div></td>
+      <td class="r nw">{{ pct(t.pnl_pct) }}<div class="mute">{{ ('+' if t.pnl > 0 else '') ~ num(t.pnl, cur) }}</div></td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="mute">거래가 없었어요 — 신호가 거의 안 났거나 종목이 종목당 금액보다 비싸요.</div>{% endif %}
+</div>
+{% else %}
+<div class="card"><div class="mute">아직 실행한 적이 없어요. 위에서 ‘백테스트 실행’을 눌러 보세요.</div></div>
+{% endif %}
+<script>
+(function(){
+  if (!document.getElementById('busy')) return;
+  var t = setInterval(async function () {
+    try { var r = await fetch('{{ url_for("api_status") }}'); var s = await r.json(); if (!s.busy) { clearInterval(t); location.reload(); } } catch (e) {}
+  }, 4000);
+})();
+</script>
+{% endblock %}

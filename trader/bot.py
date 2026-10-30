@@ -318,6 +318,11 @@ class Bot:
             candidates = sent
 
         # 5) AI 판단
+        if cfg.ai_news and not is_rules and candidates:     # 뉴스·공시 (설정에서 켰을 때만)
+            from . import news
+            k = news.enrich(candidates, cfg.market, cfg.data_dir, self.say)
+            self.say(f"📰 뉴스·공시: {k}/{len(candidates)}종목에 최근 소식 첨부")
+
         ctx = {
             "today": now().strftime("%Y-%m-%d %A"),
             "market": cfg.market.upper(),          # KR | US

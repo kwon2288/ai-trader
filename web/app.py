@@ -86,7 +86,7 @@ def _busy(c) -> bool:
         return True
 
 
-def _start_job(kind: str, market: str = "kr") -> str | None:
+def _start_job(kind: str, market: str = "kr", params: dict | None = None) -> str | None:
     c = cfg()
     with _job_lock:
         if _busy(c):
@@ -97,6 +97,8 @@ def _start_job(kind: str, market: str = "kr") -> str | None:
         try:
             if kind == "scan":
                 run_scan(cfg(), source="web")
+            elif kind == "backtest":
+                _run_backtest(market, params or {})
             else:
                 run_cycle(cfg(), analyze_only=(kind == "analyze"), force=False, source="web", market=market)
         except Busy:
@@ -334,6 +336,47 @@ def bars_svg(items: list[tuple[str, float]]) -> str:
     return "".join(out)
 
 
+def _compare_bench(c, j, start, end) -> dict | None:
+    """같은 기간 봇 자산 변화(예산 대비) vs 지수 ETF 를 같은 금액으로 들고 있었을 때."""
+    series = j.equity_series(c.ledger, 5000)
+    if not series:
+        return None
+    s_iso, e_iso = (start.isoformat() if start else series[0]["ts"][:10]), (end.isoformat() if end else "9999")
+    before = [x for x in series if x["ts"][:10] < s_iso]
+    inside = [x for x in series if s_iso <= x["ts"][:10] <= e_iso]
+    if not inside:
+        return None
+    e0 = before[-1]["equity"] if before else inside[0]["equity"]
+    daily = {}
+    for x in inside:
+        daily[x["ts"][:10].replace("-", "")] = x["equity"]
+    budget = float(c.total_krw) or 1
+    out = {"bot_pct": round((inside[-1]["equity"] - e0) / budget * 100, 2), "bench_name": BENCH[c.market][1],
+           "bench_pct": None, "chart": ""}
+    try:
+        from trader import backtest
+        from trader.runner import make_broker
+        days = 30 + (datetime.now(KST).date() - datetime.fromisoformat(s_iso).date()).days
+        bars = backtest.load_bars(make_broker(c), BENCH[c.market][0], max(40, int(days * 0.75) + 10),
+                                  c.data_dir / "bars" / c.market)
+        s_key, e_key = s_iso.replace("-", ""), e_iso.replace("-", "")
+        b0 = next((b["close"] for b in reversed(bars) if b["date"] < s_key), None) or \
+            next((b["close"] for b in bars if b["date"] >= s_key), None)
+        b1 = next((b["close"] for b in reversed(bars) if b["date"] <= e_key), None)
+        if b0 and b1:
+            out["bench_pct"] = round((b1 / b0 - 1) * 100, 2)
+            bmap = {b["date"]: b["close"] for b in bars}
+            ds = sorted(daily)
+            if len(ds) >= 2:
+                out["chart"] = lines_svg(
+                    [[budget + daily[d] - e0 for d in ds],
+                     [budget * bmap[d] / b0 if d in bmap else None for d in ds]],
+                    ["봇", "지수"], ["up" if daily[ds[-1]] >= e0 else "down", "bench"])
+    except Exception as e:  # noqa: BLE001
+        out["bench_err"] = str(e)[:120]
+    return out
+
+
 @app.get("/pnl")
 @login_required
 def pnl():
@@ -353,7 +396,8 @@ def pnl():
         for d, v in days:
             agg[d[:7] + "-01"] = agg.get(d[:7] + "-01", 0) + v
         days = sorted(agg.items())
-    return render_template("pnl.html", c=c, base=base, market=m, r=r, periods=PERIODS, p=p,
+    cmp_ = _compare_bench(c, j, start, end)
+    return render_template("pnl.html", c=c, base=base, market=m, r=r, periods=PERIODS, p=p, cmp=cmp_,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
                            snap=j.snapshot(c.ledger))
 
@@ -705,6 +749,7 @@ ENV_GROUPS = [
         ("GEMINI_API_KEY", "Gemini (aistudio.google.com)", "secret"),
         ("ANTHROPIC_API_KEY", "Claude (console.anthropic.com)", "secret"),
         ("OPENAI_API_KEY", "ChatGPT (platform.openai.com)", "secret"),
+        ("DART_API_KEY", "DART 공시 키 — 뉴스·공시 켤 때 (opendart.fss.or.kr, 무료)", "secret"),
     ]),
     ("알림 — 텔레그램 · 카카오톡 (선택)", "notify", [
         ("TELEGRAM_BOT_TOKEN", "텔레그램 봇 토큰 (@BotFather)", "secret"),
@@ -1007,6 +1052,76 @@ def kakao_disconnect():
     notify.kakao_disconnect(cfg().data_dir)
     flash("카카오톡 알림 연결을 끊었습니다.", "ok")
     return redirect(url_for("settings") + "#notify")
+
+
+# ── 백테스트 ───────────────────────────────────────────────
+BENCH = {"kr": ("069500", "KODEX 200 (코스피200)"), "us": ("SPY", "SPY (S&P 500)")}
+
+
+def _run_backtest(market: str, p: dict) -> None:
+    from trader import backtest
+    from trader.runner import make_broker, market_cfg
+    c = market_cfg(cfg(), market)
+    j = Journal(c.db_path)
+    try:
+        res = backtest.run_job(c, make_broker(c), p["days"], p["stop"], p["take"], p["symbols"], BENCH[market][0],
+                               progress=lambda k, n, code: _job.update(progress=f"{k}/{n} {code}"))
+        j.add_log(c.ledger, "backtest", "web",
+                  f"백테스트 {res.get('start')}~{res.get('end')}: 수익률 {res['return_pct']:+.2f}% "
+                  f"(기준 {res.get('bench_pct')}%), 최대 낙폭 {res['mdd_pct']}%, 거래 {res['n']}회 ({res['seconds']}초)")
+    except Exception as e:  # noqa: BLE001
+        j.add_log(c.ledger, "backtest", "web", f"❌ 백테스트 실패: {e}")
+
+
+def lines_svg(series: list[list[float]], labels: list[str], classes: list[str]) -> str:
+    pts_all = [v for s in series for v in s if v is not None]
+    if not pts_all or max(len(s) for s in series) < 2:
+        return ""
+    w, h, pad = 600, 170, 6
+    lo, hi = min(pts_all), max(pts_all)
+    span = (hi - lo) or 1
+    out = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-label="자산 비교">']
+    for s, cl in zip(series, classes):
+        n = len(s)
+        pts = " ".join(f"{pad + i * (w - 2 * pad) / (n - 1):.1f},{h - pad - (v - lo) * (h - 2 * pad) / span:.1f}"
+                       for i, v in enumerate(s) if v is not None)
+        out.append(f'<polyline points="{pts}" class="line {cl}"/>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+@app.route("/backtest", methods=["GET", "POST"])
+@login_required
+def backtest_page():
+    from trader import backtest
+    m = current_market()
+    base = cfg()
+    c = base.for_market(m)
+    if request.method == "POST":
+        try:
+            days = int(request.form.get("days", "500"))
+            stop = float(request.form.get("stop", c.stop_loss_pct))
+            take = float(request.form.get("take", c.take_profit_pct))
+        except ValueError:
+            flash("숫자를 확인하세요.", "err")
+            return redirect(url_for("backtest_page"))
+        if days not in (250, 500, 750) or not (-50 <= stop < 0) or not (0 < take <= 200):
+            flash("기간·손절(-50~0)·익절(0~200)을 확인하세요.", "err")
+            return redirect(url_for("backtest_page"))
+        syms = [cfgmod.norm_symbol(x, m) for x in (request.form.get("symbols") or "").replace(",", " ").split()]
+        syms = list(dict.fromkeys(x for x in syms if x))[:40] or c.symbols[:40]
+        err = _start_job("backtest", m, {"days": days, "stop": stop, "take": take, "symbols": syms})
+        flash(err or f"🧪 백테스트를 시작했어요 — {len(syms)}종목, 처음엔 데이터 받느라 1~3분 걸려요.", "err" if err else "ok")
+        return redirect(url_for("backtest_page"))
+    r = backtest.load(c.data_dir, m)
+    chart = ""
+    if r and r.get("curve"):
+        eq = [x["equity"] for x in r["curve"]]
+        bmap = {x["date"]: x["v"] for x in r.get("bench_curve") or []}
+        chart = lines_svg([eq, [bmap.get(x["date"]) for x in r["curve"]]] if bmap else [eq],
+                          ["봇 전략", "기준"], ["up" if eq[-1] >= eq[0] else "down", "bench"])
+    return render_template("backtest.html", c=c, base=base, market=m, r=r, chart=chart, bench=BENCH[m],
+                           busy=_busy(c), job=_job)
 
 
 # ── 패스키 로그인 ─────────────────────────────────────

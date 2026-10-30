@@ -180,6 +180,7 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     text = _set(text, "order", "type", order_type)
     text = _set(text, "ai", "provider", provider)
     text = _set(text, "ai", "hybrid", form.get("hybrid") == "on")
+    text = _set(text, "ai", "news", form.get("news") == "on")
     for key, m in models.items():
         text = _set(text, "ai", key, m)
     # 예전 설정의 model 키 제거 (claude_model 로 대체)

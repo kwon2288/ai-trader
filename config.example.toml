@@ -35,6 +35,7 @@ type = "market"
 provider = "claude"
 # 하이브리드: 규칙(추세·과열)이 먼저 신호를 찾고, 신호 난 종목만 AI 에게 확인 → 신호 없으면 AI 호출 생략
 hybrid = true
+news = false        # AI 에 최근 뉴스 제목·공시(DART)도 함께 보내기 — 웹 설정 → AI 에서 켜고 끔
 claude_model = "claude-sonnet-5-5"   # 저렴: claude-haiku-5-5
 gemini_model = "gemini-3.8-flash"    # 저렴: gemini-3.5-flash-lite
 openai_model = "gpt-6.1-sol"         # 저렴: gpt-6-luna
