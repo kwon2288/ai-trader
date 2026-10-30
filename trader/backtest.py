@@ -29,13 +29,15 @@ def load_bars(broker, code: str, days: int, cache_dir: Path) -> list[dict]:
     if f.exists():
         try:
             d = json.loads(f.read_text())
-            if d.get("date") == today and len(d.get("bars", [])) >= min(days, d.get("max", days)):
+            # 오늘 받은 것이고, 그때 요청한 기간이 지금 요청 이상일 때만 재사용
+            # (손익 화면이 짧게 받아 둔 지수 데이터를 백테스트가 그대로 쓰던 문제 방지)
+            if d.get("date") == today and d.get("asked", 0) >= days:
                 return d["bars"][-days:]
         except ValueError:
             pass
     fn = getattr(broker, "history", None)
     bars = fn(code, days) if fn else broker.daily(code, days)
-    f.write_text(json.dumps({"date": today, "max": len(bars), "bars": bars}))
+    f.write_text(json.dumps({"date": today, "asked": days, "bars": bars}))
     return bars
 
 
@@ -57,6 +59,7 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
     dates = sorted({b["date"] for bars in data.values() for b in bars})
     pos: dict[str, dict] = {}          # code → {qty, cost(수수료 포함), avg, day}
     realized, trades, curve = 0.0, [], []
+    paid = {"fees": 0.0}
     pending: list[tuple[str, str, float]] = []   # (BUY/SELL, code, strength) → 다음 날 시가에
 
     def sell(code, px, d, why):
@@ -64,6 +67,7 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
         p = pos.pop(code)
         gross = p["qty"] * px
         cost_out = gross * (fee + tax(code))
+        paid["fees"] += cost_out + p["qty"] * p["avg"] * fee
         pnl = gross - cost_out - p["cost"]
         realized += pnl
         trades.append({"code": code, "name": names.get(code, code), "buy_date": p["day"], "sell_date": d,
@@ -132,6 +136,19 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
         peak = max(peak, v)
         mdd = min(mdd, (v / peak - 1) * 100)
     wins = [t for t in trades if t["pnl"] > 0]
+    by_code: dict[str, dict] = {}
+    for t in trades:
+        b = by_code.setdefault(t["code"], {"code": t["code"], "name": t["name"], "n": 0, "pnl": 0.0, "wins": 0})
+        b["n"] += 1
+        b["pnl"] = round(b["pnl"] + t["pnl"], 2)
+        b["wins"] += int(t["pnl"] > 0)
+    # 데이터 점검: 기간이 짧거나, 하루 ±35% 넘는 움직임(액면분할 미반영·데이터 오류 의심)
+    checks = []
+    for code, bars in data.items():
+        jumps = [b["date"] for a, b in zip(bars, bars[1:]) if a["close"] and abs(b["close"] / a["close"] - 1) > 0.35]
+        checks.append({"code": code, "name": names.get(code, code), "bars": len(bars),
+                       "first": bars[0]["date"] if bars else "", "jumps": jumps[:3]})
+    short = [c for c in checks if c["bars"] < len(dates) * 0.8]
     res = {"start": curve[0]["date"] if curve else None, "end": curve[-1]["date"] if curve else None,
            "days": len(curve), "return_pct": round((eq[-1] / budget - 1) * 100, 2), "pnl": round(eq[-1] - budget, 2),
            "mdd_pct": round(mdd, 2), "trades": list(reversed(trades)), "n": len(trades),
@@ -139,7 +156,12 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
            "avg_win": round(sum(t["pnl_pct"] for t in wins) / len(wins), 2) if wins else None,
            "avg_loss": round(sum(t["pnl_pct"] for t in trades if t["pnl"] <= 0) / max(1, len(trades) - len(wins)), 2)
            if len(trades) > len(wins) else None,
-           "open_positions": len(pos), "curve": curve, "stop": stop, "take": take, "symbols": len(data)}
+           "open_positions": len(pos), "curve": curve, "stop": stop, "take": take, "symbols": len(data),
+           "fees": round(paid["fees"], 2),
+           "gross_return_pct": round((eq[-1] + paid["fees"]) / budget * 100 - 100, 2),
+           "fee_pct": round(fee * 100, 3), "by_code": sorted(by_code.values(), key=lambda b: b["pnl"]),
+           "checks": checks, "warn_short": [c["name"] for c in short],
+           "warn_jumps": [f"{c['name']}({', '.join(c['jumps'])})" for c in checks if c["jumps"]]}
     if bench and curve:
         bmap = {b["date"]: b["close"] for b in bench}
         b0 = next((bmap[c["date"]] for c in curve if c["date"] in bmap), None)

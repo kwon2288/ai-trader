@@ -70,6 +70,10 @@ def test_run_job_cache_and_page():
     assert r["days"] > 100 and "bench_pct" in r and backtest.load(cfg.data_dir, "kr")["params"]["days"] == 250
     backtest.run_job(cfg, B(), 250, -5, 10, ["000001", "000002"], "069500")
     assert calls.count("000001") == 1                                  # 같은 날은 캐시
+    # 짧게 받아 둔 캐시(손익 화면의 지수 비교 등)는 긴 백테스트에 재사용하지 않는다
+    backtest.load_bars(B(), "SPY", 40, cfg.data_dir / "bars" / "x")
+    assert len(backtest.load_bars(B(), "SPY", 300, cfg.data_dir / "bars" / "x")) == 300
+    assert "fees" in r and "gross_return_pct" in r and isinstance(r["by_code"], list)
     from web.app import app
     cl = app.test_client()
     with cl.session_transaction() as s:
