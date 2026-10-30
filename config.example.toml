@@ -126,3 +126,10 @@ include_env = false   # .env(앱키·비밀번호)도 포함할지
 remote_type = ""      # 원격 저장: "" | "ftp" | "ftps" | "webdav"  (비밀번호는 .env 의 BACKUP_REMOTE_PASSWORD)
 remote_url = ""       # 예: "ftp://nas.local/backup/ai-trader" · "https://nas.local:5006/backup/ai-trader"
 remote_user = ""
+
+[strategy]
+# 전략 옵션 (웹 설정 → 전략, 백테스트 ‘자동 비교’로 효과 확인)
+market_filter = false   # 지수(국내 KODEX 200, 미국 SPY)가 200일선 아래면 새로 사지 않음 (매도·손절은 그대로)
+core_pct = 0            # 예산 중 이 비율(%)은 코어 ETF 를 사서 계속 보유 — 봇 매매·손절 대상 아님 (0 = 끔)
+core_kr = "069500"      # 국내 코어 ETF (KODEX 200)
+core_us = "SPYM"        # 미국 코어 ETF (S&P 500)

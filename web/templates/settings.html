@@ -110,6 +110,26 @@
   <span class="mute">예산 · AI · 종목 · 미국 주식 설정 저장</span></div>
 </form>
 
+<div class="card sec" id="strategy" data-sum="시장 필터 {{ '켬' if strat.get('market_filter') else '끔' }} · 코어 {{ strat.get('core_pct', 0) }}%">
+  <h2 class="sec-head">전략 — 시장 필터 · 코어-위성</h2>
+  <form method="post" action="{{ url_for('strategy_save') }}">
+    <label style="display:flex;gap:8px;align-items:flex-start;color:var(--fg)">
+      <input type="checkbox" name="market_filter" style="width:auto;margin-top:3px" {{ 'checked' if strat.get('market_filter') }}>
+      <span>시장 필터 — 지수가 200일선 아래면 새로 사지 않기
+        <span class="mute" style="display:block">국내는 KODEX 200, 미국은 SPY 기준. 하락장에서 새 매수를 멈춰 손실을 줄여요 (매도·손절은 그대로).</span></span></label>
+    <div class="grid2" style="margin-top:8px">
+      <div><label for="core_pct_s">코어 ETF 비중 (%, 0 = 끔)</label><input id="core_pct_s" name="core_pct" value="{{ strat.get('core_pct', 0) }}" inputmode="numeric"></div>
+      <div><label for="core_kr">국내 코어 ETF</label><input id="core_kr" name="core_kr" value="{{ strat.get('core_kr', '069500') }}"></div>
+      <div><label for="core_us">미국 코어 ETF</label><input id="core_us" name="core_us" value="{{ strat.get('core_us', 'SPYM') }}"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn">전략 저장</button>
+      <a class="btn" href="{{ url_for('backtest_page') }}">🔍 백테스트로 비교해 보기</a></div>
+  </form>
+  <div class="mute" style="margin-top:8px"><b>코어-위성</b>: 예산 중 코어 비중만큼은 지수 ETF 를 사서 계속 들고 있고(매매·손절 안 함),
+    나머지만 봇이 사고팔아요. 예) 예산 20만원 · 코어 70% → 14만원은 KODEX 200 보유, 6만원으로 봇 매매.
+    직접 갖고 있는 종목은 코어로 고를 수 없어요(섞이지 않게).</div>
+</div>
+
 <div class="card sec" id="mode" data-sum="{{ {'dry':'드라이런','mock':'모의투자','live':'🔴 실계좌'}[c.mode] }}">
   <h2 class="sec-head">실행 모드</h2>
   <div class="row">

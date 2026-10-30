@@ -74,14 +74,20 @@ def realized_total(j, ledger: str, costs: dict | None = None) -> float:
 
 
 def status(j, cfg, held: dict, account_cash: float | None) -> dict:
-    """held: 봇 몫 보유 (수량·봇 평단·현재가)."""
+    """held: 봇 몫 보유 (수량·봇 평단·현재가). 코어-위성이면 코어 ETF 몫은 위성(매매) 예산에서 뺀다."""
+    from . import strategy
+    sg = strategy.settings(cfg)
     budget = float(cfg.total_krw)
     invested = sum(h.qty * h.avg_price for h in held.values())
     unrealized = sum(h.qty * (h.now_price - h.avg_price) for h in held.values())
     costs = costs_of(cfg)
     realized = realized_total(j, cfg.ledger, costs)
     pnl = realized + unrealized
-    room = max(0.0, budget - invested)
+    core = held.get(sg["core_code"]) if sg["core_pct"] else None
+    core_inv = core.qty * core.avg_price if core else 0.0
+    core_budget = budget * sg["core_pct"] / 100
+    sat_budget = budget - core_budget
+    room = max(0.0, sat_budget - (invested - core_inv))
     acash = None if account_cash is None or account_cash == float("inf") else float(account_cash)
     avail = room if (cfg.mode == "dry" or acash is None) else min(room, acash)
     r = 2 if cfg.currency == "USD" else 0
@@ -92,7 +98,9 @@ def status(j, cfg, held: dict, account_cash: float | None) -> dict:
             "unrealized": rd(unrealized), "realized": rd(realized), "pnl": rd(pnl),
             "pnl_pct": round(pnl / budget * 100, 2) if budget else 0.0, "equity": rd(budget + pnl),
             "room": rd(room), "avail": rd(avail), "account_cash": None if acash is None else rd(acash),
-            "positions": len(held)}
+            "positions": len(held), "core_pct": sg["core_pct"], "core_code": sg["core_code"] if sg["core_pct"] else None,
+            "core_budget": rd(core_budget), "core_invested": rd(core_inv),
+            "core_value": rd(core.qty * core.now_price) if core else 0, "sat_budget": rd(sat_budget)}
 
 
 def period(j, ledger: str, start: date | None, end: date | None, costs: dict | None = None) -> dict:

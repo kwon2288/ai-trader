@@ -52,6 +52,7 @@ class Bot:
         self.lines: list[str] = []
         self.orders_left = 0
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
+        self.no_buy_reason = None
 
     def say(self, s: str) -> None:
         log.info(s)
@@ -149,6 +150,11 @@ class Bot:
             self.say(f"⚠ 체결 확인 중 오류: {e}")
         bal = self.broker.balance()
         held = own_holdings(self.j, cfg, bal.holdings)
+        from . import strategy
+        sg = strategy.settings(cfg)
+        full = dict(held)
+        if sg["core_pct"]:
+            held.pop(sg["core_code"], None)              # 코어 ETF 는 손절·익절 대상 아님
         if not held:
             return self._out(), bool(self.lines)
         prices, bids, open_ = {}, {}, False
@@ -173,8 +179,11 @@ class Bot:
                            bal.orderable_cash)
         if snap:
             snap.update({k: v for k, v in st.items() if k != "positions"})
+            full.update(held)
+            for c in [c for c in full if c not in held and c != sg.get("core_code")]:
+                full.pop(c)                               # 이번에 판 종목은 빼고, 코어는 남긴다
             snap["positions"] = [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
-                                  "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()]
+                                  "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in full.items()]
             snap.pop("ts", None)
             self.j.save_snapshot(cfg.ledger, snap)
         return self._out(), bool(self.lines)
@@ -283,6 +292,45 @@ class Bot:
 
         self.orders_left = 0 if analyze_only else cfg.max_orders_per_day - self.j.orders_today(cfg.ledger)
 
+        # 2-1) 코어-위성: 예산의 core_pct% 는 코어 ETF 를 사서 계속 보유 (봇 매매·손절 대상에서 뺌)
+        from . import strategy
+        sg = strategy.settings(cfg)
+        core_code = sg["core_code"] if sg["core_pct"] else None
+        if core_code:
+            core_h = held.pop(core_code, None)
+            need = st["core_budget"] - st["core_invested"]
+            if core_code in user_owned:
+                self.say(f"🧱 코어 {core_code}: 직접 보유한 종목이라 봇이 사지 않아요 (다른 코어 ETF 를 고르세요)")
+            elif need > 0 and not analyze_only:
+                try:
+                    q = self.broker.quote(core_code)
+                    est = q.ask or q.price
+                    cash = need if cfg.mode == "dry" or bal.orderable_cash == float("inf") else min(need, bal.orderable_cash)
+                    qty = int(cash // est) if est else 0
+                    if qty >= 1 and q.market_status == "1":
+                        if cfg.mode != "dry":
+                            qty = min(qty, self.broker.buyable_qty(core_code, est))
+                        if qty >= 1 and self._exec("BUY", core_code, q.name, qty, est, "코어 적립", ignore_cap=True):
+                            self.avail = max(0, min(self.avail, (bal.orderable_cash - qty * est)
+                                                    if bal.orderable_cash != float("inf") else self.avail))
+                    elif qty < 1:
+                        self.say(f"🧱 코어 {q.name}: 남은 코어 예산 {cfg.money(need)} 로는 1주({cfg.money(est)})를 못 사요")
+                except Exception as e:  # noqa: BLE001
+                    self.say(f"⚠ 코어 ETF 매수 실패: {e}")
+            if core_h:
+                self.say(f"🧱 코어 {core_h.name} {core_h.qty}주 보유 중 ({core_h.pnl_pct:+.1f}%) — 매매 대상 아님")
+            candidates = [c for c in candidates if c["code"] != core_code]
+
+        # 2-2) 시장 필터: 지수가 200일선 아래면 새로 사지 않음
+        self.no_buy_reason = None
+        if sg["market_filter"]:
+            ok, why = strategy.regime(self.broker, cfg)
+            if ok is False:
+                self.no_buy_reason = f"시장 필터 — {why}"
+                self.say(f"🚦 {self.no_buy_reason} → 오늘은 새로 사지 않아요")
+            elif ok is None:
+                self.say(f"🚦 시장 필터 건너뜀 ({why})")
+
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
         if not analyze_only:
             self._rule_exits(held, {c: q.price for c, q in quotes.items()}, {c: q.bid for c, q in quotes.items()})
@@ -299,7 +347,8 @@ class Bot:
             from . import signals
             cash_now = self.avail
             cheapest = min((c["price"] for c in candidates if not c["held"] and c["affordable"]), default=0)
-            can_buy = len(held) < cfg.max_positions and cheapest > 0 and cash_now >= cheapest
+            can_buy = (len(held) < cfg.max_positions and cheapest > 0 and cash_now >= cheapest
+                       and not self.no_buy_reason)
             sig = signals.evaluate(candidates, can_buy=can_buy)
             if not sig:
                 why = "" if can_buy else " (매수 여력·빈 자리 없음 → 매도 신호만 확인)"
@@ -410,6 +459,10 @@ class Bot:
                 note(d, "무시 (이미 보유 — 추가매수 안 함)"); continue
             if c in user_owned:
                 note(d, "무시 (사용자가 직접 보유한 종목 — 섞이지 않게 매수 안 함)"); continue
+            if self.no_buy_reason:
+                note(d, f"보류 ({self.no_buy_reason})"); continue
+            if core_code and c == core_code:
+                note(d, "무시 (코어 ETF — 따로 적립)"); continue
             if q.warnings:
                 note(d, f"거부 (경고 종목: {', '.join(q.warnings)})"); continue
             if d["confidence"] < cfg.min_confidence:

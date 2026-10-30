@@ -38,6 +38,8 @@
     <div class="stat"><div class="k">지금 살 수 있는 금액</div><div class="v">{{ money(snap.avail, cur) }}</div>
       <div class="mute">오늘 주문 {{ orders_today }} / {{ c.max_orders_per_day }}</div></div>
   </div>
+  {% if snap.core_pct %}<div class="mute" style="margin-top:6px">🧱 코어 {{ snap.core_code }} {{ snap.core_pct }}% — 투자 {{ money(snap.core_invested, cur) }} / {{ money(snap.core_budget, cur) }}
+    · 위성(봇 매매) 예산 {{ money(snap.sat_budget, cur) }}</div>{% endif %}
   {% set b = snap.budget if snap.budget > 0 else 1 %}
   {% set short = [snap.room - snap.avail, 0]|max %}
   <div style="margin:12px 0 4px;font-size:13px">예산 사용</div>
