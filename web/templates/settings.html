@@ -1,9 +1,13 @@
 {% extends "base.html" %}
 {% block title %}설정 · AI 자동매매{% endblock %}
 {% block body %}
+<div class="row" style="justify-content:flex-end;margin-bottom:8px;gap:6px">
+  <button type="button" class="btn" id="openall" style="padding:5px 12px;font-size:13px">모두 펼치기</button>
+  <button type="button" class="btn" id="closeall" style="padding:5px 12px;font-size:13px">모두 접기</button>
+</div>
 <form method="post">
-<div class="card">
-  <h2>예산 · 위험관리</h2>
+<div class="card sec main-form" id="budget" data-sum="원금 {{ "{:,}".format(c.total_krw|int) }}원 · 손절 {{ c.stop_loss_pct }}% · 익절 +{{ c.take_profit_pct }}%">
+  <h2 class="sec-head">예산 · 위험관리</h2>
   <div class="grid2">
   {% for key, label, val in fields %}
     <div><label for="{{ key }}">{{ label }}</label>
@@ -12,8 +16,8 @@
   </div>
 </div>
 
-<div class="card">
-  <h2>AI</h2>
+<div class="card sec main-form" id="ai" data-sum="{{ providers.get(c.ai_provider, c.ai_provider) }}{{ ' + 규칙필터' if c.ai_hybrid and c.ai_provider != 'rules' }}">
+  <h2 class="sec-head">AI</h2>
   <label for="provider">판단에 쓸 AI</label>
   <select id="provider" name="provider">
   {% for k, v in providers.items() %}
@@ -52,8 +56,8 @@
   <div class="mute" style="margin-top:6px">다수결은 AI 수만큼 비용이 들고, 과반이 같은 의견일 때만 매수·매도합니다.</div>
 </div>
 
-<div class="card">
-  <h2>분석 대상 종목</h2>
+<div class="card sec main-form" id="symbols" data-sum="핵심 {{ raw.universe.symbols|length }}종목 + 자동 {{ raw.universe.get('auto_count', 0) }}종목">
+  <h2 class="sec-head">분석 대상 종목</h2>
   <label for="symbols">핵심 종목 — 항상 분석 (6자리 코드, 쉼표나 줄바꿈으로 구분, 최대 40개)</label>
   <textarea id="symbols" name="symbols" rows="5">{{ raw.universe.symbols|join(', ') }}</textarea>
   <div class="mute" style="margin-top:6px">종목당 최대 금액보다 비싼 종목은 매수 후보에서 빠집니다. 보유 중인 종목은 목록에서 지워도 계속 분석해요.</div>
@@ -73,8 +77,8 @@
   </label>
 </div>
 
-<div class="card">
-  <h2>🇺🇸 미국 주식</h2>
+<div class="card sec main-form" id="us" data-sum="{{ ('사용 · 원금 $' ~ us.get('total_usd', 300) ~ ' · ' ~ us.symbols|length ~ '종목') if us.enabled else '꺼짐' }}">
+  <h2 class="sec-head">🇺🇸 미국 주식</h2>
   <label style="display:flex;gap:8px;align-items:center;color:var(--fg)">
     <input type="checkbox" name="us_enabled" style="width:auto" {{ 'checked' if us.enabled }}>
     미국 주식 자동매매 사용 (국내와 예산·장부·손실한도 따로)
@@ -98,11 +102,12 @@
   <div class="mute" style="margin-top:6px">종목당 최대 금액보다 비싼 종목은 매수 후보에서 빠집니다(소수점 매수 안 함). 미국은 자동 종목 선정 없이 이 목록만 분석해요.</div>
 </div>
 
-<div class="row" style="margin-bottom:14px"><button class="btn pri">저장</button></div>
+<div class="row" id="mainsave" style="margin-bottom:14px"><button class="btn pri">저장</button>
+  <span class="mute">예산 · AI · 종목 · 미국 주식 설정 저장</span></div>
 </form>
 
-<div class="card" id="mode">
-  <h2>실행 모드</h2>
+<div class="card sec" id="mode" data-sum="{{ {'dry':'드라이런','mock':'모의투자','live':'🔴 실계좌'}[c.mode] }}">
+  <h2 class="sec-head">실행 모드</h2>
   <div class="row">
     현재 {% if c.mode == 'live' %}<span class="badge b-err">🔴 실계좌</span>
     {% elif c.mode == 'mock' %}<span class="badge b-ok">모의투자</span>
@@ -151,8 +156,8 @@
   </div>
 </div>
 
-<div class="card" id="schedule">
-  <h2>자동 실행 시각</h2>
+<div class="card sec" id="schedule" data-sum="🇰🇷 {{ sched.kr }}{{ (' · 🇺🇸 ' ~ sched.us) if c.us_enabled }}">
+  <h2 class="sec-head">자동 실행 시각</h2>
   <form method="post" action="{{ url_for('schedule_save') }}">
     <div class="grid2">
       <div><label for="sched_kr">🇰🇷 국내 — 한국시간 (09:10~15:10)</label>
@@ -167,8 +172,8 @@
     횟수를 늘리면 AI 호출과 주문 기회가 늘어요 — 하루 주문 한도는 ‘예산 · 위험관리’에서.</div>
 </div>
 
-<div class="card" id="notify">
-  <h2>알림 — 텔레그램 · 카카오톡</h2>
+<div class="card sec" id="notify" data-sum="{{ ['텔레그램' if tg_ready, '카카오톡' if kakao]|select|join(' · ') or '연결 안 됨' }}">
+  <h2 class="sec-head">알림 — 텔레그램 · 카카오톡</h2>
   <div class="row" style="gap:6px">
     <span class="badge {{ 'b-ok' if tg_ready else '' }}">텔레그램 {{ '연결됨' if tg_ready else ('채팅 ID 필요' if tg_token else '꺼짐') }}</span>
     <span class="badge {{ 'b-ok' if kakao else '' }}">카카오톡 {{ ('연결됨 · ' ~ kakao.refresh_days ~ '일 남음') if kakao else '꺼짐' }}</span>
@@ -208,8 +213,8 @@
   <div class="mute" style="margin-top:8px">알림이 실패해도 매매에는 영향이 없어요. 카카오톡은 메시지가 길면 앞부분만 보내요.</div>
 </div>
 
-<div class="card" id="security">
-  <h2>보안 — 패스키 로그인</h2>
+<div class="card sec" id="security" data-sum="패스키 {{ passkey_list|length }}개 등록">
+  <h2 class="sec-head">보안 — 패스키 로그인</h2>
   <div class="mute"><b>패스키</b>로 비밀번호 없이 로그인해요. 기기에서 Face ID·Touch ID·화면 잠금으로 확인합니다. 기기마다 한 번 등록하면 돼요.</div>
   {% if passkey_list %}
   <div class="scroll" style="margin-top:8px"><table>
@@ -255,8 +260,8 @@
 })();
 </script>
 
-<div class="card" id="update">
-  <h2>업데이트</h2>
+<div class="card sec" id="update" data-sum="v{{ app_version }}{{ (' → 새 버전 v' ~ upd.latest) if upd and upd.behind }}">
+  <h2 class="sec-head">업데이트</h2>
   <div class="row">
     <span>지금 버전 <b>v{{ app_version }}</b></span>
     {% if upd and upd.behind %}<span class="badge b-warn">새 버전 v{{ upd.latest }} 있음</span>
@@ -289,8 +294,8 @@
   {% endif %}
 </div>
 
-<div class="card" id="env">
-  <h2>연결 정보 — 앱키 · 계좌 · AI 키</h2>
+<div class="card sec" id="env" data-sum="증권사 · AI 키 · 알림 키 · 웹 비밀번호">
+  <h2 class="sec-head">연결 정보 — 앱키 · 계좌 · AI 키</h2>
   {% if web_env %}
   <form method="post" action="{{ url_for('change_env') }}" id="envform" autocomplete="off">
     <div class="mute">넣은 값은 보안상 다시 보여 주지 않아요. <b>빈칸은 그대로 둡니다</b> — 바꿀 칸만 입력하세요.</div>
@@ -364,5 +369,35 @@ document.querySelectorAll('.model-select').forEach(function (sel) {
   sel.addEventListener('change', sync);
   sync();
 });
+</script>
+<script>
+// 설정 카드 접기/펼치기 — 주소 끝 #이름 의 카드나 오류가 있는 카드는 펼쳐서 연다
+(function () {
+  var secs = Array.prototype.slice.call(document.querySelectorAll('.card.sec'));
+  var save = document.getElementById('mainsave');
+  function sync() {
+    if (save) save.style.display = secs.some(function (s) { return s.classList.contains('main-form') && s.classList.contains('open'); }) ? '' : 'none';
+  }
+  function set(s, on) { s.classList.toggle('open', on); sync(); }
+  secs.forEach(function (s) {
+    var h = s.querySelector('.sec-head');
+    var sum = document.createElement('div'); sum.className = 'sec-sum mute'; sum.textContent = s.dataset.sum || '';
+    h.insertAdjacentElement('afterend', sum);
+    h.setAttribute('role', 'button'); h.tabIndex = 0;
+    h.addEventListener('click', function () { set(s, !s.classList.contains('open')); });
+    h.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); h.click(); } });
+  });
+  function openHash() {
+    var id = (location.hash || '').slice(1), t = id && document.getElementById(id);
+    if (t && t.classList.contains('sec')) { set(t, true); t.scrollIntoView({block: 'start'}); }
+  }
+  window.addEventListener('hashchange', openHash);
+  openHash(); sync();
+  document.getElementById('openall').onclick = function () { secs.forEach(function (s) { set(s, true); }); };
+  document.getElementById('closeall').onclick = function () { secs.forEach(function (s) { set(s, false); }); };
+  document.querySelector('form') && document.querySelector('form').addEventListener('invalid', function (e) {
+    var s = e.target.closest('.card.sec'); if (s) set(s, true);
+  }, true);
+})();
 </script>
 {% endblock %}

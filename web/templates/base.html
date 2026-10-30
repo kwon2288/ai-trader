@@ -43,6 +43,13 @@ a.btn{text-decoration:none;display:inline-block}
 .pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 .pills a{padding:5px 11px;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--fg);text-decoration:none}
 .pills a.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.card.sec>.sec-head{cursor:pointer;margin:0;display:flex;align-items:center;gap:6px;user-select:none}
+.card.sec>.sec-head::before{content:"▸";color:var(--mute);font-size:13px;width:12px}
+.card.sec.open>.sec-head::before{content:"▾"}
+.card.sec>.sec-sum{margin-top:4px;font-size:13px;padding-left:18px}
+.card.sec:not(.open)>:not(.sec-head):not(.sec-sum){display:none!important}
+.card.sec.open>.sec-sum{display:none}
+.card.sec.open>.sec-head{margin-bottom:10px}
 details.acct>summary{cursor:pointer;list-style:none}
 details.acct>summary::-webkit-details-marker{display:none}
 details.acct>summary::before{content:"▸ ";color:var(--mute)}
