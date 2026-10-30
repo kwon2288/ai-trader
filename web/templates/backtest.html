@@ -50,7 +50,7 @@
         <input type="hidden" name="stop" value="{{ x.stop }}"><input type="hidden" name="take" value="{{ x.take }}">
         <input type="hidden" name="min_hold" value="{{ x.min_hold }}"><input type="hidden" name="core_pct" value="{{ x.core_pct }}">
         <input type="hidden" name="market_filter" value="{{ '1' if x.market_filter else '0' }}">
-        <button class="btn" style="padding:4px 9px;font-size:12px">적용</button></form></td></tr>
+        <button class="btn" style="padding:4px 9px;font-size:12px;white-space:nowrap">적용</button></form></td></tr>
     {% endfor %}
   </table></div>
   <div class="mute" style="margin-top:6px">순위 = 수익률 − 최대 낙폭의 절반 (많이 벌어도 크게 흔들리면 감점). 과거에 가장 잘 맞은 조건이
