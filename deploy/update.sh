@@ -24,6 +24,10 @@ for f in deploy/*.service deploy/*.timer; do
   fi
 done
 [ "$reload" = 1 ] && systemctl daemon-reload
+# 장중 감시 타이머: 자동 실행을 설치해 둔 서버면 설정(watch_minutes)대로 처음 한 번 설치
+if [ -f /etc/systemd/system/ai-trader.timer ] && [ ! -f /etc/systemd/system/ai-trader-watch-kr.timer ]; then
+  .venv/bin/python run.py timers || true
+fi
 if systemctl is-active --quiet ai-trader-web; then
   systemctl restart ai-trader-web && echo "↻ 웹 관리 화면 재시작"
 fi

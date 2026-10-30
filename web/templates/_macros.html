@@ -30,9 +30,16 @@
 {% for o in orders %}
 <tr>
   <td class="nw">{{ o.ts[5:10] }}<div class="mute">{{ o.ts[11:16] }}</div></td>
-  <td class="nw act-{{ o.side }}">{{ '매수' if o.side=='BUY' else '매도' }}{% if not o.ok %} <span class="badge b-err">실패</span>{% endif %}</td>
+  <td class="nw act-{{ o.side }}">{{ '매수' if o.side=='BUY' else '매도' }}{% if not o.ok %} <span class="badge b-err">실패</span>{% endif %}
+    {% set st = o.status %}{% if st in ('sent','open') %}<div><span class="badge b-warn">체결 대기</span></div>
+    {% elif st == 'partial' %}<div><span class="badge b-warn">일부 체결</span></div>
+    {% elif st == 'canceled' %}<div><span class="badge">{{ '일부 체결' if o.filled_qty else '미체결 취소' }}</span></div>
+    {% elif st == 'rejected' %}<div><span class="badge b-err">거부</span></div>{% endif %}</td>
   <td>{{ o.name }}<div class="mute">{{ o.code }}</div></td>
-  <td class="r">{{ o.qty }}</td><td class="r">{{ num(o.qty * o.est_price, cur) }}</td>
+  {% set fq = o.filled_qty if (st and st not in ('failed',) and o.filled_qty is not none) else o.qty %}
+  {% set fp = o.fill_price or o.est_price %}
+  <td class="r">{% if st in ('sent','open','partial','canceled') and fq != o.qty %}{{ fq|int }}/{{ o.qty }}{% else %}{{ o.qty }}{% endif %}</td>
+  <td class="r">{{ num((fq if fq else o.qty) * fp, cur) }}{% if o.fill_price %}<div class="mute">@{{ num(o.fill_price, cur) }}</div>{% endif %}</td>
   <td>{{ o.trigger }}{% if not o.ok %}<div class="mute">{{ o.message }}</div>{% endif %}</td>
 </tr>
 {% else %}<tr><td colspan="6" class="mute">주문 내역이 없습니다.</td></tr>{% endfor %}
@@ -41,7 +48,7 @@
 
 {% macro log_item(l) %}
 <details>
-  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ '🇺🇸 ' if l.mode and l.mode.endswith('_us') }}{{ {'trade':'매매','analyze':'분석','scan':'종목검색','mode':'모드 변경','env':'연결 정보','update':'업데이트','passkey':'패스키','schedule':'실행 시각'}.get(l.kind, l.kind) }}
+  <summary>{{ l.ts[5:16].replace('T',' ') }} · {{ '🇺🇸 ' if l.mode and l.mode.endswith('_us') }}{{ {'trade':'매매','analyze':'분석','scan':'종목검색','mode':'모드 변경','env':'연결 정보','update':'업데이트','passkey':'패스키','schedule':'실행 시각','watch':'장중 감시','backup':'백업'}.get(l.kind, l.kind) }}
     · {{ {'timer':'자동','web':'웹','cli':'명령줄'}.get(l.source, l.source) }}</summary>
   <pre>{{ l.output }}</pre>
 </details>

@@ -272,7 +272,32 @@ class TossBroker:
         except BrokerError as e:
             return OrderResult(False, "", str(e))
         oid = str(res.get("orderId") or "")
-        return OrderResult(bool(oid), oid[:16], "주문 접수")
+        return OrderResult(bool(oid), oid, "주문 접수")
+
+    # ── 체결 확인 · 취소 ──
+    def order_status(self, order_no: str, code: str, side: str, qty: int, price: float, day: str):
+        from .broker import OrderFill
+        try:
+            o = self._req("GET", f"/api/v1/orders/{order_no}", account=True) or {}
+        except BrokerError:
+            return None
+        ex = o.get("execution") or {}
+        filled = float(ex.get("filledQuantity") or 0)
+        st = str(o.get("status") or "")
+        state = {"FILLED": "filled", "CANCELED": "canceled", "REJECTED": "rejected", "PARTIAL_FILLED": "partial",
+                 "REPLACED": "canceled"}.get(st, "partial" if filled else "open")
+        f = lambda k: float(ex[k]) if ex.get(k) not in (None, "") else None  # noqa: E731
+        return OrderFill(filled, f("averageFilledPrice") or 0.0, max(0.0, float(o.get("quantity") or qty) - filled)
+                         if state in ("open", "partial") else 0, state, f("commission"), f("tax"))
+
+    def cancel(self, order_no: str, code: str) -> OrderResult:
+        if self.mode == "dry":
+            return OrderResult(True, "DRY", "[드라이런] 취소")
+        try:
+            res = self._req("POST", f"/api/v1/orders/{order_no}/cancel", body={}, account=True) or {}
+        except BrokerError as e:
+            return OrderResult(False, "", str(e))
+        return OrderResult(bool(res.get("orderId")), str(res.get("orderId") or ""), "취소 요청")
 
     def buy(self, code: str, qty: int, price=None) -> OrderResult:
         return self._order("BUY", code, qty, price)

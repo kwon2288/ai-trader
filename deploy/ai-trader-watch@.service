@@ -1,0 +1,10 @@
+[Unit]
+Description=AI 자동매매 장중 감시 (AI 없이 손절·익절) — %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ai-trader
+ExecStart=/opt/ai-trader/.venv/bin/python run.py watch --market %i
+TimeoutStartSec=300

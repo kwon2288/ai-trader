@@ -72,11 +72,11 @@ class FakeAI:
         return {"market_view": "테스트", "decisions": self.decisions}
 
 
-def setup(mode="mock", decisions=(), prices=None, holdings=None, **kw):
+def setup(mode="mock", decisions=(), prices=None, holdings=None, status="1", **kw):
     tmp = Path(tempfile.mkdtemp())
     cfg = make_cfg(tmp, mode, **kw)
     broker = FakeBroker(prices or {"000001": 20_000, "000002": 30_000, "000003": 80_000},
-                        holdings)
+                        holdings, status=status)
     ai = FakeAI(list(decisions))
     return cfg, broker, ai, Bot(cfg, broker, ai, Journal(cfg.db_path))
 
@@ -132,8 +132,8 @@ def test_drawdown_halts_and_kill_switch():
     cfg, br, _, bot = setup(decisions=[
         {"code": "000001", "action": "BUY", "amount_krw": 40_000, "confidence": 0.9, "reason": "r"}])
     from trader.broker import OrderResult as R
-    bot.j.add_order("mock", "BUY", "000009", "x", 1, 100_000, R(True, "1", "ok"), "AI")   # 10만원에 사서
-    bot.j.add_order("mock", "SELL", "000009", "x", 1, 70_000, R(True, "2", "ok"), "AI")   # 7만원에 팜 → -30%
+    bot.j.add_order("mock", "BUY", "000009", "x", 1, 100_000, R(True, "1", "ok"), "AI", status="filled")   # 10만원에 사서
+    bot.j.add_order("mock", "SELL", "000009", "x", 1, 70_000, R(True, "2", "ok"), "AI", status="filled")   # 7만원에 팜 → -30%
     out = bot.run()
     assert br.orders == [] and "최대 손실" in out
     assert bot.j.get("halted_mock") == "1"
@@ -209,7 +209,7 @@ def test_old_position_without_qty_uses_order_history():
     _, br, _, bot = setup(holdings={"000001": Holding("000001", "종목1", 28, 15_000, 24_000)},
                           prices={"000001": 24_000, "000002": 30_000, "000003": 80_000})
     bot.j.db.execute("INSERT INTO bot_positions(code,name,opened,market) VALUES('000001','종목1','2026-01-01','kr')")
-    bot.j.add_order("mock", "BUY", "000001", "종목1", 1, 20_000, R(True, "9", "ok"), "AI")
+    bot.j.add_order("mock", "BUY", "000001", "종목1", 1, 20_000, R(True, "9", "ok"), "AI", status="filled")
     out = bot.run()
     assert "봇 몫 1주만" in out, out
     assert ("SELL", "000001", 1) in br.orders                         # 익절(+15%)도 1주만
@@ -235,13 +235,83 @@ def test_profit_not_reinvested_and_pnl_sums():
     from trader.broker import OrderResult as R
     cfg, br, _, bot = setup(holdings={"000001": Holding("000001", "종목1", 1, 20_000, 18_000)})
     j = bot.j
-    j.add_order("mock", "BUY", "000009", "x", 1, 50_000, R(True, "1", "ok"), "AI")
-    j.add_order("mock", "SELL", "000009", "x", 1, 80_000, R(True, "2", "ok"), "AI")
+    cfg.costs = {"kr_fee_pct": 0, "kr_sell_tax_pct": 0}                 # 수수료 없이 계산 확인
+    j.add_order("mock", "BUY", "000009", "x", 1, 50_000, R(True, "1", "ok"), "AI", status="filled")
+    j.add_order("mock", "SELL", "000009", "x", 1, 80_000, R(True, "2", "ok"), "AI", status="filled")
     j.open_position("000001", "종목1", "kr", 1, 20_000)
     held = {"000001": Holding("000001", "종목1", 1, 20_000, 18_000)}
     st = ledger.status(j, cfg, held, 10_000_000)
     assert (st["realized"], st["unrealized"], st["pnl"]) == (30_000, -2_000, 28_000)
     assert st["pnl_pct"] == 28.0 and st["room"] == 80_000 and st["avail"] == 80_000
+
+
+def test_fees_and_tax_reduce_realized_pnl():
+    from trader import ledger
+    from trader.broker import OrderResult as R
+    cfg, _, _, bot = setup()
+    j = bot.j
+    j.add_order("mock", "BUY", "000009", "삼성전자", 10, 10_000, R(True, "1", "ok"), "AI", status="filled")
+    j.add_order("mock", "SELL", "000009", "삼성전자", 10, 11_000, R(True, "2", "ok"), "AI", status="filled")
+    j.add_order("mock", "BUY", "000008", "KODEX 200", 10, 10_000, R(True, "3", "ok"), "AI", status="filled")
+    j.add_order("mock", "SELL", "000008", "KODEX 200", 10, 11_000, R(True, "4", "ok"), "AI", status="filled")
+    t = {x["name"]: x for x in ledger.trades(j, "mock", ledger.costs_of(cfg))}
+    # 주식: 수수료 0.015% ×(10만+11만) + 거래세 0.20% × 11만 = 31.5 + 220
+    assert abs(t["삼성전자"]["pnl"] - (10_000 - 31.5 - 220)) < 0.01
+    assert abs(t["KODEX 200"]["pnl"] - (10_000 - 31.5)) < 0.01        # ETF 는 거래세 없음
+    # 증권사가 실제 수수료·세금을 주면 그 값을 쓴다
+    j.db.execute("UPDATE orders SET fee=10, tax=0 WHERE order_no IN ('1','2')")
+    t = {x["name"]: x for x in ledger.trades(j, "mock", ledger.costs_of(cfg))}
+    assert abs(t["삼성전자"]["pnl"] - (10_000 - 20)) < 0.01
+
+
+def test_fill_tracking_partial_and_cancel():
+    # 체결 조회를 지원하는 증권사: 주문 즉시 보유로 잡지 않고, 체결된 만큼만 반영. 다음 실행 때 미체결은 취소
+    from trader import fills
+    from trader.broker import OrderFill
+    _, br, _, bot = setup(decisions=[
+        {"code": "000001", "action": "BUY", "amount_krw": 40_000, "confidence": 0.9, "reason": "r"}])
+    state = {"filled": 1}
+    br.order_status = lambda no, code, side, qty, price, day: OrderFill(
+        state["filled"], 20_000, qty - state["filled"], "filled" if state["filled"] >= qty else
+        ("canceled" if state.get("canceled") else "partial"))
+    br.cancel = lambda no, code: (state.update(canceled=True), __import__("trader.broker", fromlist=["x"]).OrderResult(True, "C", "ok"))[1]
+    fills.time.sleep = lambda s: None
+    import trader.bot as tbot
+    bot.run()
+    assert bot.j.bot_lots()["000001"][0] == 1                  # 2주 주문 중 1주만 체결 → 1주만 보유
+    o = bot.j.orders("mock")[0]
+    assert o["status"] == "partial" and o["filled_qty"] == 1
+    # 다음 실행: 남은 1주는 취소
+    bot.j.db.execute("UPDATE orders SET ts = '2000-01-01T00:00:00' || substr(ts, 20)")
+    bot.j.db.execute("UPDATE orders SET ts = datetime('now','localtime','-1 minute')")
+    out = fills.reconcile(bot.j, bot.cfg, br, say=lambda m: None, cancel_before="9999")
+    o = bot.j.orders("mock")[0]
+    assert o["status"] == "canceled" and o["filled_qty"] == 1 and bot.j.bot_lots()["000001"][0] == 1
+
+
+def test_watch_stop_loss_market_order_ignores_cap():
+    # 장중 감시: AI 없이 손절 — 시장가, 하루 주문 한도를 다 써도 판다
+    _, br, ai, bot = setup(holdings={"000001": Holding("000001", "종목1", 2, 20_000, 18_000)},
+                           prices={"000001": 18_000, "000002": 30_000, "000003": 80_000}, max_orders_per_day=0)
+    bot.j.open_position("000001", "종목1", "kr", 2, 20_000)        # -10% → 손절
+    prices = []
+    orig = br.sell
+    br.sell = lambda code, qty, price=None: (prices.append(price), orig(code, qty, price))[1]
+    bot.cfg.order_type = "limit"
+    out, acted = bot.watch()
+    assert ("SELL", "000001", 2) in br.orders and prices == [None] and acted, out
+    assert ai.ctx is None                                             # AI 는 부르지 않음
+
+
+def test_watch_quiet_when_closed_or_ok():
+    _, br, _, bot = setup(holdings={"000001": Holding("000001", "종목1", 2, 20_000, 20_000)})
+    bot.j.open_position("000001", "종목1", "kr", 2, 20_000)
+    out, acted = bot.watch()
+    assert br.orders == [] and not acted
+    _, br2, _, bot2 = setup(holdings={"000001": Holding("000001", "종목1", 2, 20_000, 10_000)}, status="2")
+    bot2.j.open_position("000001", "종목1", "kr", 2, 20_000)
+    out, acted = bot2.watch()                                         # 장 마감이면 손절선이어도 조용히
+    assert br2.orders == [] and not acted
 
 
 if __name__ == "__main__":

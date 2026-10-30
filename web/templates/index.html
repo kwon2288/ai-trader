@@ -17,9 +17,10 @@
     {% elif halted %}<span class="badge b-err">🛑 손실 한도로 정지</span>
     {% elif stopped %}<span class="badge b-warn">⏸ 정지됨</span>
     {% else %}<span class="badge b-ok">● 자동 실행 대기</span>{% endif %}
+    {% if missed %}<span class="badge b-err">⏰ 오늘 {{ missed|join(', ') }} 실행 누락{% if market == 'us' %} (뉴욕){% endif %}</span>{% endif %}
   </div>
   <div class="mute" style="margin-top:6px">
-    다음 자동 실행 {{ next_run }}{% if market == 'us' %} (한국시간){% endif %} · <a href="{{ url_for('settings') }}#schedule" class="mute">시각 바꾸기</a>
+    다음 자동 실행 {{ next_run }}{% if market == 'us' %} (한국시간){% endif %}{% if watch_last %} · 장중 감시 {{ watch_last }}{% endif %} · <a href="{{ url_for('settings') }}#schedule" class="mute">시각 바꾸기</a>
     {% if stopped or halted %} — 정지 상태라 건너뜁니다{% endif %}
   </div>
 </div>
@@ -55,7 +56,7 @@
   {% endif %}
   {{ chart|safe }}
   <div class="mute">지금 살 수 있는 금액 = min(남은 예산, 계좌 주문가능 현금) · 남은 예산 = 설정 예산 − 봇 투자 중<br>
-    수익은 재투자하지 않고 계좌에 남아요. 손익은 수수료·세금 전 추정치 · 기준 {{ snap.ts[5:16].replace('T',' ') }}
+    수익은 재투자하지 않고 계좌에 남아요. 실현 손익은 수수료·세금 반영 · 기준 {{ snap.ts[5:16].replace('T',' ') }}
     · <a href="{{ url_for('pnl') }}">기간별 손익 →</a></div>
   {% elif snap %}
   <div class="mute">새 계산 방식으로 바뀌었어요. 아래 ‘↻ 잔고 새로고침’을 누르면 다시 계산해서 보여 줘요.</div>

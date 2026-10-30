@@ -21,7 +21,8 @@
   <div class="mute">{{ start.isoformat() if start else '처음' }} ~ {{ end.isoformat() if end else '오늘' }}</div>
   <div class="stats" style="margin-top:8px">
     <div class="stat"><div class="k">실현 손익</div><div class="v"><span class="{{ 'up' if r.pnl > 0 else ('down' if r.pnl < 0 else '') }}">{{ ('+' if r.pnl > 0 else '') ~ money(r.pnl, cur) }}</span></div>
-      {% if snap and snap.budget %}<div class="mute">예산 대비 {{ "%+.2f"|format(r.pnl / snap.budget * 100) }}%</div>{% endif %}</div>
+      {% if snap and snap.budget %}<div class="mute">예산 대비 {{ "%+.2f"|format(r.pnl / snap.budget * 100) }}%</div>{% endif %}
+      <div class="mute">수수료·세금 −{{ num(r.costs, cur) }} 반영</div></div>
     <div class="stat"><div class="k">매도 / 매수</div><div class="v">{{ r.n }} / {{ r.buys }}건</div>
       <div class="mute">매수 금액 {{ money(r.buy_amount, cur) }}</div></div>
     <div class="stat"><div class="k">승률</div><div class="v">{% if r.win_rate is not none %}{{ r.win_rate }}%{% else %}-{% endif %}</div>
@@ -59,10 +60,12 @@
     <tr><td class="nw">{{ tr.ts[5:10] }}<div class="mute">{{ tr.ts[11:16] }}</div></td>
       <td>{{ tr.name }}<div class="mute">{{ tr.code }}</div></td><td class="r">{{ tr.qty }}</td>
       <td class="r nw">{{ num(tr.avg, cur) }}<div class="mute">→ {{ num(tr.price, cur) }}</div></td>
-      <td class="r nw">{{ pct(tr.pnl_pct) }}<div class="mute">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div></td></tr>
+      <td class="r nw">{{ pct(tr.pnl_pct) }}<div class="mute">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div>
+        <div class="mute" style="font-size:11px">비용 {{ num(tr.cost, cur) }}</div></td></tr>
     {% endfor %}
   </table></div>
   {% else %}<div class="mute">없음</div>{% endif %}
-  <div class="mute" style="margin-top:6px">주문 기록의 예상 가격 기준이며 수수료·세금은 빠져 있어요. 정확한 체결가는 증권사 앱에서 확인하세요.</div>
+  <div class="mute" style="margin-top:6px">실제 체결가 기준이에요 (v0.14 이전 주문은 예상가). 수수료·세금은 증권사가 알려 주면 실제 값,
+    아니면 설정 → 예산·위험관리의 비율로 계산한 추정치예요.</div>
 </div>
 {% endblock %}

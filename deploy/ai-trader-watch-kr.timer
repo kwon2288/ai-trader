@@ -1,0 +1,10 @@
+[Unit]
+Description=AI 자동매매 장중 감시 — 국내 (간격은 웹 설정 → 자동 실행 시각)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09..15:00/15:00 Asia/Seoul
+Unit=ai-trader-watch@kr.service
+Persistent=false
+
+[Install]
+WantedBy=timers.target

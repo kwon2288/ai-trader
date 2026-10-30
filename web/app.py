@@ -133,6 +133,23 @@ def root_icons():
     return send_from_directory(app.static_folder, f, mimetype="image/png", max_age=86400)
 
 
+# ── 실행 누락 감시 (웹이 켜져 있는 동안 5분마다) ──────────────
+def _monitor_loop():
+    from trader import monitor, notify
+    while True:
+        time.sleep(300)
+        try:
+            c = cfg()
+            raw = settings_io.read(CONFIG_PATH)
+            j = Journal(c.db_path)
+            monitor.check(j, c, raw, notify.send)
+            from trader import backup
+            if datetime.now(KST).hour >= 18:           # 장 끝난 뒤 오늘 백업이 아직 없으면
+                backup.daily(j, c.data_dir, raw)
+        except Exception as e:  # noqa: BLE001
+            app.logger.warning("누락 감시·백업 오류: %s", e)
+
+
 # ── 인증 ───────────────────────────────────────────────
 def login_required(fn):
     @wraps(fn)
@@ -238,9 +255,15 @@ def index():
     stopped = c.stop_file.exists()
     halted = j.get(f"halted_{c.ledger}") == "1"
     now = datetime.now(KST)
+    from trader import monitor
     from trader.runner import broker_name
+    try:
+        missed = monitor.missed_slots(j, base, settings_io.read(CONFIG_PATH), m) if monitor.timer_installed(m) else []
+    except Exception:  # noqa: BLE001
+        missed = []
     return render_template(
-        "index.html", c=c, base=base, market=m, broker=broker_name(c),
+        "index.html", c=c, base=base, market=m, broker=broker_name(c), missed=missed,
+        watch_last=(j.get(f"watch_last_{c.ledger}") or "")[11:16],
         snap=snap, stopped=stopped, halted=halted, busy=_busy(c), job=_job,
         next_run=fmt_kst(next_run(now) if m == "kr" else next_run_us(now)),
         chart=equity_svg(j.equity_series(c.ledger), c.total_krw),
@@ -322,7 +345,7 @@ def pnl():
     p = request.args.get("p", "month")
     f, t = request.args.get("from"), request.args.get("to")
     start, end = _period_range(p, f, t)
-    r = ledger.period(j, c.ledger, start, end)
+    r = ledger.period(j, c.ledger, start, end, ledger.costs_of(c))
     days = r["by_day"]
     monthly = len(days) > 45
     if monthly:
@@ -509,7 +532,9 @@ def settings():
             flash("저장했습니다. 다음 실행부터 적용됩니다.", "ok")
             return redirect(url_for("settings"))
     raw = settings_io.read(CONFIG_PATH)
-    fields = [(key, label, raw.get(sec, {}).get(key, "")) for sec, key, _t, _lo, _hi, label in settings_io.FIELDS]
+    from trader.ledger import DEFAULT_COSTS
+    fields = [(key, label, raw.get(sec, {}).get(key, DEFAULT_COSTS.get(key, "")))
+              for sec, key, _t, _lo, _hi, label in settings_io.FIELDS]
     auto_fields = [(key, label, raw.get(sec, {}).get(key, settings_io.DEFAULTS.get(key, "")))
                    for sec, key, _t, _lo, _hi, label in settings_io.AUTO_FIELDS]
     us_fields = [(key, label, raw.get("us", {}).get(key, settings_io.US_DEFAULTS.get(key, "")))
@@ -524,6 +549,7 @@ def settings():
                            web_update=_web_update(),
                            sched={mk: ", ".join(__import__("trader.schedule", fromlist=["x"]).times(raw, mk))
                                   for mk in ("kr", "us")},
+                           watch_min=__import__("trader.schedule", fromlist=["x"]).watch_minutes(raw),
                            notify_kinds=__import__("trader.notify", fromlist=["x"]).KINDS,
                            notify_on={k: __import__("trader.notify", fromlist=["x"]).enabled(cfg(), k)
                                       for k in __import__("trader.notify", fromlist=["x"]).KINDS},
@@ -532,6 +558,8 @@ def settings():
                            kakao_key=bool(os.environ.get("KAKAO_REST_KEY")),
                            kakao=__import__("trader.notify", fromlist=["x"]).kakao_info(cfg().data_dir),
                            kakao_redirect=_public_base() + url_for("kakao_callback"),
+                           backups=__import__("trader.backup", fromlist=["x"]).listing(cfg().data_dir),
+                           bk=__import__("trader.backup", fromlist=["x"]).settings(raw),
                            passkey_list=__import__("web.passkeys", fromlist=["x"]).load(cfg().data_dir),
                            acct_choice=session.get("acct_choice"),
                            mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
@@ -683,6 +711,8 @@ ENV_GROUPS = [
         ("TELEGRAM_CHAT_ID", "텔레그램 채팅 ID — 알림 칸의 ‘찾기’로 자동 입력", "plain"),
         ("KAKAO_REST_KEY", "카카오 REST API 키 (developers.kakao.com)", "id"),
         ("KAKAO_CLIENT_SECRET", "카카오 Client Secret — 켠 경우만", "secret"),
+        ("HEALTHCHECK_URL", "헬스체크 주소 — 서버 꺼짐 감시 (healthchecks.io 등)", "secret"),
+        ("HEALTHCHECK_URL_US", "미국용 헬스체크 주소 — 따로 볼 때만", "secret"),
     ]),
     ("한국투자증권 (선택)", "kis", [
         ("KIS_APP_KEY", "모의투자 앱키", "id"),
@@ -799,6 +829,52 @@ def change_env():
     return render_template("restarting.html", names=names)
 
 
+# ── 백업 ─────────────────────────────────────────────────
+@app.post("/backup/now")
+@login_required
+def backup_now():
+    from trader import backup
+    c = cfg()
+    try:
+        p, notes = backup.make(c.data_dir, settings_io.read(CONFIG_PATH))
+        flash(f"백업했습니다: {p.name} ({p.stat().st_size / 1024:,.0f}KB){' · ' + ', '.join(notes) if notes else ''}", "ok")
+        Journal(c.db_path).add_log(c.ledger, "backup", "web", f"백업: {p.name}")
+    except Exception as e:  # noqa: BLE001
+        flash(f"백업 실패: {e}", "err")
+    return redirect(url_for("settings") + "#backup")
+
+
+@app.get("/backup/<name>")
+@login_required
+def backup_download(name):
+    import re as _re
+    from flask import abort, send_from_directory
+    from trader import backup
+    if not _re.fullmatch(r"ai-trader-\d{8}-\d{6}\.zip", name):
+        abort(404)
+    return send_from_directory(backup.folder(cfg().data_dir), name, as_attachment=True)
+
+
+@app.post("/backup/settings")
+@login_required
+def backup_settings():
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    try:
+        keep = max(1, min(365, int(request.form.get("keep_days", "14"))))
+    except ValueError:
+        keep = 14
+    extra = (request.form.get("extra_dir") or "").strip()
+    if extra and not extra.startswith("/"):
+        flash("추가 저장 위치는 / 로 시작하는 서버 경로여야 합니다 (예: /mnt/nas/ai-trader).", "err")
+        return redirect(url_for("settings") + "#backup")
+    text = settings_io._set(text, "backup", "keep_days", keep)
+    text = settings_io._set(text, "backup", "extra_dir", extra)
+    text = settings_io._set(text, "backup", "include_env", bool(request.form.get("include_env")))
+    CONFIG_PATH.write_text(text, encoding="utf-8")
+    flash("백업 설정을 저장했습니다.", "ok")
+    return redirect(url_for("settings") + "#backup")
+
+
 # ── 알림 (텔레그램 · 카카오톡) ─────────────────────────────
 def _public_base() -> str:
     host = os.environ.get("WEB_PUBLIC_HOST") or request.host
@@ -824,9 +900,17 @@ def schedule_save():
             flash(e, "err")
         return redirect(url_for("settings") + "#schedule")
     old = settings_io.read(CONFIG_PATH)
+    try:
+        wm = int(request.form.get("watch_minutes", "15"))
+    except ValueError:
+        wm = 15
+    wm = wm if wm in schedule.WATCH_CHOICES else 15
     for mk in ("kr", "us"):
         text = settings_io._set(text, "schedule", mk, new[mk])
+    text = settings_io._set(text, "schedule", "watch_minutes", wm)
     CONFIG_PATH.write_text(text, encoding="utf-8")
+    if schedule.watch_minutes(old) != wm or request.form.get("watch_apply"):
+        flash(schedule.apply_watch(wm, ["kr"] + (["us"] if cfg().us_enabled else [])), "ok")
     for mk in ("kr", "us"):
         if schedule.times(old, mk) != new[mk]:
             name = "국내" if mk == "kr" else "미국"
@@ -1126,6 +1210,7 @@ def main():
         sys.exit("웹 비밀번호가 없습니다 → .venv/bin/python run.py passwd  (또는 .env 에 WEB_PASSWORD 를 8자 이상)")
     host = os.environ.get("WEB_HOST", "0.0.0.0")
     port = int(os.environ.get("WEB_PORT", "8080"))
+    threading.Thread(target=_monitor_loop, daemon=True, name="monitor").start()
     from waitress import serve
     print(f"웹 관리 화면: http://{host}:{port}")
     serve(app, host=host, port=port, threads=4)

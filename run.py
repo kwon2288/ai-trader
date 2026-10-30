@@ -7,6 +7,7 @@
   python run.py aitest    # AI 키·모델 연결 확인 (Claude/Gemini/ChatGPT)
   python run.py analyze   # AI 분석 결과만 보기 (주문 없음, 장외 시간에도 가능)
   python run.py trade     # 실제 사이클 실행 — TRADING_MODE(dry/mock/live)에 따라 동작
+  python run.py watch     # 장중 감시 — AI 없이 손절·익절만 확인 (타이머가 10~30분마다)
   python run.py report    # 최근 30일 주문 내역
   python run.py stop      # 킬스위치 ON (이후 trade 가 아무것도 안 함)
   python run.py resume    # 킬스위치·손실한도 정지 해제
@@ -63,7 +64,7 @@ def main() -> None:
     from trader import __version__
     p = argparse.ArgumentParser(description="AI 자동매매")
     p.add_argument("--version", action="version", version=f"ai-trader {__version__}")
-    p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume",
+    p.add_argument("cmd", choices=["check", "accounts", "scan", "aitest", "analyze", "trade", "report", "stop", "resume", "watch", "timers",
                                       "passwd"])
     p.add_argument("--force", action="store_true", help="장 상태 확인 무시 (테스트용)")
     p.add_argument("--market", choices=["kr", "us"], default="kr", help="kr=국내(기본), us=미국")
@@ -131,6 +132,18 @@ def main() -> None:
 
     from trader.broker import BrokerError
     from trader.runner import Busy, broker_name, make_broker, market_cfg, run_cycle
+
+    if args.cmd == "timers":                        # 장중 감시 타이머를 설정대로 설치·적용 (update.sh 가 호출)
+        import tomllib
+        from trader import schedule
+        raw = tomllib.loads(config.ensure_config().read_text(encoding="utf-8"))
+        print(schedule.apply_watch(schedule.watch_minutes(raw), ["kr"] + (["us"] if cfg.us_enabled else [])))
+        return
+
+    if args.cmd == "watch":                         # 장중 감시: AI 없이 손절·익절만
+        from trader.runner import run_watch
+        print(run_watch(cfg, args.market, source="timer" if os.environ.get("INVOCATION_ID") else "cli") or "이상 없음")
+        return
 
     if args.cmd in ("analyze", "trade"):
         if args.cmd == "trade":

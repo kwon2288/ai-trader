@@ -91,6 +91,21 @@ class OrderResult:
     message: str
 
 
+@dataclass
+class OrderFill:
+    """주문 체결 상태. state: open(대기) · partial(일부 체결, 대기 중) · filled · canceled · rejected"""
+    filled: float          # 체결 수량 (누적)
+    avg_price: float       # 평균 체결가 (체결 없으면 0)
+    open_qty: float        # 아직 대기 중인 수량
+    state: str
+    fee: float | None = None   # 증권사가 알려 주면 실제 수수료·세금
+    tax: float | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.state in ("filled", "canceled", "rejected")
+
+
 class BrokerError(RuntimeError):
     pass
 
@@ -338,3 +353,38 @@ class NHBroker:
 
     def sell(self, code: str, qty: int, price: int | None = None) -> OrderResult:
         return self._order("SELL", code, qty, price)
+
+    # ── 체결 확인 · 취소 ─────────────────────────────────
+    def order_status(self, order_no: str, code: str, side: str, qty: int, price: float, day: str) -> OrderFill | None:
+        """day: 주문일 YYYY-MM-DD. 주문을 못 찾으면 None."""
+        data = self._post("/krstock/inquiry/v1/dailyOrderExecution", {
+            "orr_dt": day.replace("-", ""), "act_no": self.account, "orr_mkt_cd": "00", "ost_cns_dit": "0"})
+        rows = data.get("Output_0") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        want = "매수" if side == "BUY" else "매도"
+
+        def same(r, by_no: bool) -> bool:
+            if str(r.get("iem_cd", "")).strip().lstrip("A")[-6:] != code:
+                return False
+            if by_no:
+                return str(_int(r.get("itg_orr_no"))) == str(_int(order_no))
+            return (want in str(r.get("sby_dit_cd_nm", "")) and _int(r.get("orr_qty")) == int(qty)
+                    and (not price or abs(_num(r.get("orr_pr")) - float(price)) < 0.5))
+        r = next((x for x in rows if same(x, True)), None) or next((x for x in rows if same(x, False)), None)
+        if r is None:
+            return None
+        filled, open_q, can = _int(r.get("tot_cns_qty")), _int(r.get("ny_cns_qty")), _int(r.get("can_qty"))
+        rej = str(r.get("orr_rjt_rsn_cd_nm") or "").strip()
+        state = ("rejected" if rej and not filled else "filled" if filled >= int(qty)
+                 else "canceled" if can or (open_q == 0 and filled < int(qty)) else "partial" if filled else "open")
+        return OrderFill(filled, _num(r.get("cns_avg_uit_pr")), open_q, state)
+
+    def cancel(self, order_no: str, code: str) -> OrderResult:
+        if self.mode == "dry":
+            return OrderResult(True, "DRY", "[드라이런] 취소")
+        data = self._post("/krstock/order/v1/cancel", {
+            "act_no": self.account, "org_mkt_orr_no": _int(order_no), "all_pat_dit_cd": "1", "iem_cd": code})
+        o = data.get("Output_0") or {}
+        no = str(o.get("mkt_orr_no") or o.get("can_cld_mkt_orr_no1") or "").strip()
+        return OrderResult(bool(no) and no != "0", no, self._msg(data))

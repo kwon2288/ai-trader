@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+from datetime import timedelta
 
 from . import indicators
 from .broker import Holding
@@ -50,6 +51,7 @@ class Bot:
         self.j = journal or Journal(cfg.db_path)
         self.lines: list[str] = []
         self.orders_left = 0
+        self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
 
     def say(self, s: str) -> None:
         log.info(s)
@@ -68,16 +70,21 @@ class Bot:
     avail: float = 0.0
 
     # ── 주문 실행 (공통) ────────────────────────────────
-    def _exec(self, side: str, code: str, name: str, qty: int, est_price: int, trigger: str) -> bool:
-        if self.orders_left <= 0:
+    def _exec(self, side: str, code: str, name: str, qty: int, est_price: int, trigger: str,
+              force_market: bool = False, ignore_cap: bool = False) -> bool:
+        if self.orders_left <= 0 and not ignore_cap:
             self.say(f"⛔ {name} {side} 건너뜀 — 오늘 주문 한도 소진")
             return False
         price = None
-        if self.cfg.order_type == "limit":
+        if self.cfg.order_type == "limit" and not force_market:
             price = est_price
         fn = self.broker.buy if side == "BUY" else self.broker.sell
         res = fn(code, qty, price)
-        self.j.add_order(self.cfg.ledger, side, code, name, qty, est_price, res, trigger)
+        from . import fills
+        track = res.ok and self.cfg.mode != "dry" and fills.supported(self.broker)
+        self.j.add_order(self.cfg.ledger, side, code, name, qty, est_price, res, trigger,
+                         status=None if (track or not res.ok or self.cfg.mode == "dry") else "filled")
+        self.sent += int(bool(track))
         side_k = "매수" if side == "BUY" else "매도"
         if not res.ok:
             self.say(f"❌ {name} {side} {qty}주 실패: {res.message}")
@@ -96,12 +103,81 @@ class Bot:
                               f"≈{self.cfg.money(amt)} [{trigger}]{extra}")
         if side == "BUY":
             self.avail -= amt
-        if self.cfg.mode != "dry":
+        if self.cfg.mode != "dry" and not track:      # 체결 조회가 안 되는 증권사: 바로 체결된 것으로
             if side == "BUY":
                 self.j.open_position(code, name, self.cfg.market, qty, est_price)
             else:
                 self.j.reduce_position(code, qty)
         return True
+
+    # ── 손절·익절 (정기 실행과 장중 감시가 함께 씀) ─────────
+    def _exit_trigger(self, h) -> str | None:
+        pnl = round(h.pnl_pct, 6)              # 부동소수 오차(14.9999…%) 방지
+        if pnl <= self.cfg.stop_loss_pct:
+            return "손절"
+        if pnl >= self.cfg.take_profit_pct:
+            return "익절"
+        return None
+
+    def _rule_exits(self, held: dict, prices: dict, bids: dict, tag: str = "") -> int:
+        """손절은 시장가로, 하루 주문 한도와 상관없이 판다. 익절은 설정한 주문 방식·한도를 따른다."""
+        n = 0
+        for c, h in list(held.items()):
+            trig = self._exit_trigger(h)
+            if not trig:
+                continue
+            self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig}{tag} 규칙 발동")
+            qty = min(h.qty, self.broker.sellable_qty(c)) if self.cfg.mode != "dry" else h.qty
+            stop = trig == "손절"
+            if qty > 0 and self._exec("SELL", c, h.name, qty, bids.get(c) or prices.get(c) or h.now_price, trig + tag,
+                                      force_market=stop, ignore_cap=stop):
+                n += 1
+                if qty >= h.qty:
+                    held.pop(c)
+        return n
+
+    def watch(self) -> tuple[str, bool]:
+        """장중 감시 — AI 없이 봇 보유 종목의 손절·익절만 확인. 반환: (출력, 무언가 했는지)"""
+        cfg = self.cfg
+        if cfg.stop_file.exists():
+            return "킬스위치로 정지 중", False
+        from . import fills, ledger
+        try:
+            fills.reconcile(self.j, cfg, self.broker, self.say, notify=self.notify,
+                            cancel_before=(now() - timedelta(minutes=30)).isoformat(timespec="seconds"))
+        except Exception as e:  # noqa: BLE001
+            self.say(f"⚠ 체결 확인 중 오류: {e}")
+        bal = self.broker.balance()
+        held = own_holdings(self.j, cfg, bal.holdings)
+        if not held:
+            return self._out(), bool(self.lines)
+        prices, bids, open_ = {}, {}, False
+        for c in held:
+            try:
+                q = self.broker.quote(c)
+            except Exception as e:  # noqa: BLE001
+                self.say(f"⚠ {c} 시세 조회 실패: {e}")
+                continue
+            prices[c], bids[c] = q.price, q.bid
+            open_ = open_ or q.market_status == "1"
+            held[c].now_price = q.price
+        if not open_:
+            return self._out(), bool(self.lines)       # 장 시간이 아니면 조용히 끝
+        self.orders_left = cfg.max_orders_per_day - self.j.orders_today(cfg.ledger)
+        n = self._rule_exits(held, prices, bids, tag="(장중 감시)")
+        if self.sent:
+            fills.time.sleep(3)
+            fills.reconcile(self.j, cfg, self.broker, self.say)
+        snap = self.j.snapshot(cfg.ledger) or {}
+        st = ledger.status(self.j, cfg, own_holdings(self.j, cfg, self.broker.balance().holdings if n else bal.holdings),
+                           bal.orderable_cash)
+        if snap:
+            snap.update({k: v for k, v in st.items() if k != "positions"})
+            snap["positions"] = [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
+                                  "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()]
+            snap.pop("ts", None)
+            self.j.save_snapshot(cfg.ledger, snap)
+        return self._out(), bool(self.lines)
 
     # ── 메인 ────────────────────────────────────────────
     def run(self, force: bool = False, analyze_only: bool = False) -> str:
@@ -116,6 +192,14 @@ class Bot:
         if self.j.get(f"halted_{cfg.ledger}") == "1":
             self.say("⏸ 최대 손실 한도 도달로 정지된 상태입니다. 확인 후 `python run.py resume` 으로 해제하세요.")
             return self._out()
+
+        # 0) 지난 주문 체결 확인 + 남은 미체결 주문 취소 (가격이 오래됨)
+        from . import fills
+        try:
+            fills.reconcile(self.j, cfg, self.broker, self.say, notify=self.notify,
+                            cancel_before=None if analyze_only else now().isoformat(timespec="seconds"))
+        except Exception as e:  # noqa: BLE001
+            self.say(f"⚠ 체결 확인 중 오류: {e}")
 
         # 1) 데이터 수집
         candidates, quotes = [], {}
@@ -200,19 +284,13 @@ class Bot:
         self.orders_left = 0 if analyze_only else cfg.max_orders_per_day - self.j.orders_today(cfg.ledger)
 
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
-        for c, h in list(held.items()):
-            trig = None
-            pnl = round(h.pnl_pct, 6)              # 부동소수 오차(14.9999…%) 방지
-            if pnl <= cfg.stop_loss_pct:
-                trig = "손절"
-            elif pnl >= cfg.take_profit_pct:
-                trig = "익절"
-            if trig:
-                self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig} 규칙 발동")
-                qty = min(h.qty, self.broker.sellable_qty(c)) if cfg.mode != "dry" else h.qty
-                if qty > 0 and not analyze_only and self._exec("SELL", c, h.name, qty, quotes[c].bid or h.now_price, trig):
-                    if qty >= h.qty:
-                        held.pop(c)
+        if not analyze_only:
+            self._rule_exits(held, {c: q.price for c, q in quotes.items()}, {c: q.bid for c, q in quotes.items()})
+        else:
+            for c, h in held.items():
+                trig = self._exit_trigger(h)
+                if trig:
+                    self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig} 규칙 (분석 전용 — 주문 안 함)")
 
         # 4) 하이브리드: 규칙이 먼저 신호를 찾고, 신호 난 종목만 AI 에게 확인 (신호 없으면 AI 생략)
         allowed = None                       # None = 모든 후보 허용
@@ -353,6 +431,13 @@ class Bot:
         for d in decisions:
             if d.get("action") == "HOLD":
                 note(d, "유지")
+
+        if self.sent:                      # 방금 보낸 주문의 즉시 체결분을 장부에 반영
+            fills.time.sleep(3)
+            try:
+                fills.reconcile(self.j, cfg, self.broker, self.say)
+            except Exception as e:  # noqa: BLE001
+                self.say(f"⚠ 체결 확인 중 오류: {e}")
 
         self.j.finish_run(run_id, result.get("market_view", ""), result)
         if result.get("_usage"):

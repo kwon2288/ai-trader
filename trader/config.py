@@ -51,6 +51,7 @@ class Config:
     currency: str = "KRW"
     us: dict = field(default_factory=dict)   # [us] 섹션 원본
     notify: dict = field(default_factory=dict)   # [notify] 알림 종류 켜기/끄기
+    costs: dict = field(default_factory=dict)    # [costs] 수수료·세금 (%)
     # 실행 모드: "dry"(주문 안 냄) | "mock"(모의투자 주문) | "live"(실계좌 주문)
     mode: str = "dry"
     mode_source: str = "env"          # env=.env 의 TRADING_MODE, web=웹에서 바꿈(data/mode.json)
@@ -168,6 +169,7 @@ def load(config_path: Path | None = None) -> Config:
         mode=mode, mode_source=mode_source, live_ack=live_ack,
         us=dict(raw.get("us", {})),
         notify=dict(raw.get("notify", {})),
+        costs=dict(raw.get("costs", {})),
         data_dir=data_dir,
     )
     cfg.data_dir.mkdir(parents=True, exist_ok=True)

@@ -11,7 +11,7 @@ import os
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
-from .broker import Balance, BrokerError, Holding, NHBroker, OrderResult, Quote, _num
+from .broker import Balance, BrokerError, Holding, NHBroker, OrderFill, OrderResult, Quote, _num
 
 ET = ZoneInfo("America/New_York")
 NATION_US = "200"
@@ -145,5 +145,36 @@ class NHUSBroker(NHBroker):
             body["fc_orr_uit_pr"] = round(price, 2)
         path = "/gbstock/order/v1/buy" if side == "BUY" else "/gbstock/order/v1/sell"
         data = self._post(path, body)
+        no = str((data.get("Output_0") or {}).get("orr_no") or "").strip()
+        return OrderResult(bool(no) and no != "0", no, self._msg(data))
+
+    # ── 체결 확인 · 취소 ──
+    def order_status(self, order_no: str, code: str, side: str, qty: int, price: float, day: str) -> OrderFill | None:
+        from datetime import date, timedelta
+        d0 = date.fromisoformat(day)
+        for d in (d0, d0 + timedelta(days=1), d0 - timedelta(days=1)):   # 한국/뉴욕 날짜 차이
+            data = self._post("/gbstock/inquiry/v1/unexecuted", {
+                "orr_dt": d.strftime("%Y%m%d"), "act_no": self.account, "oss_sby_dit_cd": "0", "sot_dit": "0",
+                "ost_cns_dit": "0", "orr_no": int(_num(order_no))})
+            rows = data.get("Output_0") or []
+            if isinstance(rows, dict):
+                rows = [rows]
+            r = next((x for x in rows if str(int(_num(x.get("orr_no")))) == str(int(_num(order_no)))), None)
+            if r:
+                break
+        else:
+            return None
+        filled, open_q, can = int(_num(r.get("cns_qty"))), int(_num(r.get("ny_cns_orr_qty"))), int(_num(r.get("can_qty")))
+        rej = str(r.get("oss_ato_orr_sts_cd") or "").strip() == "2"
+        state = ("rejected" if rej and not filled else "filled" if filled >= int(qty)
+                 else "canceled" if can or (open_q == 0 and filled < int(qty)) else "partial" if filled else "open")
+        return OrderFill(filled, _f(r.get("cns_pr")), open_q, state)
+
+    def cancel(self, order_no: str, code: str) -> OrderResult:
+        if self.mode == "dry":
+            return OrderResult(True, "DRY", "[드라이런] 취소")
+        data = self._post("/gbstock/order/v1/cancel", {
+            "act_no": self.account, "org_orr_no": int(_num(order_no)), "fc_sec_trd_nat_cd": NATION_US,
+            "iem_cd": code, "all_pat_dit_cd": "1"})
         no = str((data.get("Output_0") or {}).get("orr_no") or "").strip()
         return OrderResult(bool(no) and no != "0", no, self._msg(data))

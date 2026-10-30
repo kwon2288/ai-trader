@@ -224,11 +224,48 @@ class KISBroker:
             res = self._req("POST", "/uapi/domestic-stock/v1/trading/order-cash", tr, body)
         except BrokerError as e:
             return OrderResult(False, "", str(e))
-        odno = str((res.get("output") or {}).get("ODNO", "")).strip()
-        return OrderResult(bool(odno), odno, res.get("msg1", ""))
+        out = res.get("output") or {}
+        odno = str(out.get("ODNO", "")).strip()
+        org = str(out.get("KRX_FWDG_ORD_ORGNO", "")).strip()
+        return OrderResult(bool(odno), f"{odno}|{org}" if org else odno, res.get("msg1", ""))   # 취소에 지점번호 필요
 
     def buy(self, code: str, qty: int, price: int | None = None) -> OrderResult:
         return self._order("BUY", code, qty, price)
 
     def sell(self, code: str, qty: int, price: int | None = None) -> OrderResult:
         return self._order("SELL", code, qty, price)
+
+    # ── 체결 확인 · 취소 ──
+    def order_status(self, order_no: str, code: str, side: str, qty: int, price: float, day: str):
+        from .broker import OrderFill
+        odno = order_no.split("|")[0]
+        d = day.replace("-", "")
+        body = self._req("GET", "/uapi/domestic-stock/v1/trading/inquire-daily-ccld", self._tr("TTTC0081R"), {
+            "CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "INQR_STRT_DT": d, "INQR_END_DT": d,
+            "SLL_BUY_DVSN_CD": "00", "PDNO": code, "ORD_GNO_BRNO": "", "ODNO": odno, "CCLD_DVSN": "00",
+            "INQR_DVSN": "00", "INQR_DVSN_1": "", "INQR_DVSN_3": "00", "EXCG_ID_DVSN_CD": "KRX",
+            "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""})
+        rows = body.get("output1") or []
+        r = next((x for x in rows if str(x.get("odno", "")).lstrip("0") == odno.lstrip("0")), None)
+        if r is None:
+            return None
+        filled, open_q = _int(r.get("tot_ccld_qty")), _int(r.get("rmn_qty"))
+        canceled = str(r.get("cncl_yn", "")).upper() == "Y" or _int(r.get("cncl_cfrm_qty")) > 0
+        rej = _int(r.get("rjct_qty")) > 0
+        state = ("rejected" if rej and not filled else "filled" if filled >= int(qty)
+                 else "canceled" if canceled else "partial" if filled else "open")
+        return OrderFill(filled, float(r.get("avg_prvs") or 0), open_q, state)
+
+    def cancel(self, order_no: str, code: str) -> OrderResult:
+        if self.mode == "dry":
+            return OrderResult(True, "DRY", "[드라이런] 취소")
+        odno, _, org = order_no.partition("|")
+        try:
+            res = self._req("POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", self._tr("TTTC0013U"), {
+                "CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "KRX_FWDG_ORD_ORGNO": org, "ORGN_ODNO": odno,
+                "ORD_DVSN": "00", "RVSE_CNCL_DVSN_CD": "02", "ORD_QTY": "0", "ORD_UNPR": "0",
+                "QTY_ALL_ORD_YN": "Y", "EXCG_ID_DVSN_CD": "KRX"})
+        except BrokerError as e:
+            return OrderResult(False, "", str(e))
+        no = str((res.get("output") or {}).get("ODNO", "")).strip()
+        return OrderResult(bool(no), no, res.get("msg1", ""))

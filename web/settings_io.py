@@ -16,6 +16,9 @@ FIELDS = [
     ("risk", "max_orders_per_day", int, 0, 50, "하루 최대 주문 수"),
     ("risk", "min_confidence", float, 0, 1, "최소 AI 확신도 (0~1)"),
     ("risk", "min_hold_days", int, 0, 60, "최소 보유일"),
+    ("costs", "kr_fee_pct", float, 0, 1, "국내 수수료 (%, 매수·매도 각각)"),
+    ("costs", "kr_sell_tax_pct", float, 0, 1, "국내 매도 거래세 (%, ETF 제외)"),
+    ("costs", "us_fee_pct", float, 0, 2, "미국 수수료 (%, 매수·매도 각각)"),
 ]
 AUTO_FIELDS = [
     ("universe", "auto_count", int, 0, 30, "자동 선정 종목 수 (0 = 끄기)"),

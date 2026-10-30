@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 from .broker import BrokerError
 from .config import Config
-from .journal import Journal
+from .journal import KST, Journal
 
 
 class Busy(RuntimeError):
@@ -100,8 +100,58 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
                 notify.send(cfg, "errors", f"⚠ {flag} 자동매매 실행 오류\n{e}")
         j.add_log(cfg.ledger, kind, source, out)
         if not analyze_only and source == "timer":
+            from . import monitor
+            monitor.ping(cfg, ok=not out.startswith("❌"))
             _daily_summary(cfg, j)
+            try:                                        # 하루 한 번 매매 기록 백업
+                import tomllib
+                from . import backup
+                from .config import ensure_config
+                backup.daily(j, cfg.data_dir, tomllib.loads(ensure_config().read_text(encoding="utf-8")))
+            except Exception as e:  # noqa: BLE001
+                j.add_log(cfg.ledger, "backup", source, f"⚠ 백업 실패: {e}")
         return out
+
+
+def run_watch(cfg: Config, market: str = "kr", source: str = "timer") -> str:
+    """장중 감시 (AI 없음) — 다른 실행 중이면 조용히 건너뛴다. 무언가 했을 때만 실행 로그에 남긴다."""
+    try:
+        lock = run_lock(cfg)
+        lock.__enter__()
+    except Busy:
+        return "다른 실행 중 — 건너뜀"
+    try:
+        j = Journal(cfg.db_path)
+        try:
+            cfg = market_cfg(cfg, market)
+            if not live_allowed(cfg):
+                return "실계좌 확인 절차 전 — 건너뜀"
+            if j.get(f"halted_{cfg.ledger}") == "1":
+                pass                                  # 손실 한도 정지 중에도 손절은 계속 지킨다
+            from .bot import Bot
+            out, acted = Bot(cfg, make_broker(cfg), None, j).watch()
+        except Exception as e:  # noqa: BLE001
+            out, acted = f"❌ 장중 감시 오류: {e}", True
+            from . import notify
+            last = j.get(f"watch_err_{cfg.ledger}")
+            if last != str(e)[:200]:                 # 같은 오류는 한 번만 알림
+                notify.send(cfg, "errors", f"⚠ {'🇺🇸' if cfg.market == 'us' else '🇰🇷'} 장중 감시 오류\n{e}")
+                j.set(f"watch_err_{cfg.ledger}", str(e)[:200])
+        else:
+            j.set(f"watch_err_{cfg.ledger}", "")
+            try:                                       # 장중 감시 때 정기 실행 누락도 확인
+                import tomllib
+                from . import monitor, notify
+                from .config import ensure_config
+                monitor.check(j, cfg, tomllib.loads(ensure_config().read_text(encoding="utf-8")), notify.send)
+            except Exception:  # noqa: BLE001
+                pass
+            j.set(f"watch_last_{cfg.ledger}", __import__("datetime").datetime.now(KST).isoformat(timespec="seconds"))
+        if acted and out:
+            j.add_log(cfg.ledger, "watch", source, out)
+        return out
+    finally:
+        lock.__exit__(None, None, None)
 
 
 def _daily_summary(cfg: Config, j: Journal) -> None:
@@ -126,7 +176,7 @@ def _daily_summary(cfg: Config, j: Journal) -> None:
         return
     j.set(key, now.date().isoformat())
     snap = j.snapshot(cfg.ledger) or {}
-    today = ledger.period(j, cfg.ledger, now.date(), now.date())
+    today = ledger.period(j, cfg.ledger, now.date(), now.date(), ledger.costs_of(cfg))
     flag = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(cfg.market, "")
     lines = [f"📊 {flag} 오늘 마감 요약 ({now:%m/%d})",
              f"오늘 주문: 매수 {today['buys']}건 · 매도 {today['n']}건",

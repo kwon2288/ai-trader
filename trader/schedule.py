@@ -75,3 +75,47 @@ def apply(market: str, ts: list[str]) -> str:
     except Exception as e:  # noqa: BLE001
         return f"타이머 적용 실패 ({e}) — 설정은 저장됐어요"
     return f"{timer} 에 적용했어요"
+
+
+# ── 장중 감시 (AI 없이 손절·익절만) ─────────────────────────
+WATCH_CHOICES = (0, 10, 15, 20, 30)          # 분 (0 = 끄기)
+WATCH_TIMER = {"kr": "ai-trader-watch-kr.timer", "us": "ai-trader-watch-us.timer"}
+WATCH_SERVICE = "ai-trader-watch@.service"
+
+
+def watch_minutes(cfg_raw: dict) -> int:
+    v = (cfg_raw.get("schedule") or {}).get("watch_minutes", 15)
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        v = 15
+    return v if v in WATCH_CHOICES else 15
+
+
+def apply_watch(minutes: int, markets: list[str]) -> str:
+    """장중 감시 타이머 설치·간격 적용·켜기/끄기. markets: 켤 시장 (나머지는 끔)."""
+    from .config import ROOT
+    if not shutil.which("systemctl") or not SYSTEMD.exists():
+        return "systemctl 이 없어 설정만 저장했어요"
+    try:
+        for f in [WATCH_SERVICE, *WATCH_TIMER.values()]:
+            src, dst = ROOT / "deploy" / f, SYSTEMD / f
+            if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
+                shutil.copy(src, dst)
+        msgs = []
+        for mk, timer in WATCH_TIMER.items():
+            on = minutes > 0 and mk in markets
+            d = SYSTEMD / f"{timer}.d"
+            d.mkdir(exist_ok=True)
+            hours = "09..15"
+            (d / "interval.conf").write_text(
+                "# 웹 설정에서 자동 생성 — 장중 감시 간격\n[Timer]\nOnCalendar=\n"
+                f"OnCalendar=Mon..Fri *-*-* {hours}:00/{minutes or 15}:00 {TZ[mk]}\n")
+            subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=30)
+            subprocess.run(["systemctl", "enable" if on else "disable", "--now", timer], check=True, timeout=30)
+            if on:
+                subprocess.run(["systemctl", "restart", timer], check=True, timeout=30)
+            msgs.append(f"{'국내' if mk == 'kr' else '미국'} {'켬' if on else '끔'}")
+        return "장중 감시 " + ", ".join(msgs)
+    except Exception as e:  # noqa: BLE001
+        return f"장중 감시 타이머 적용 실패 ({e}) — 설정은 저장됐어요"

@@ -40,7 +40,13 @@ class Journal:
                     "ALTER TABLE bot_positions ADD COLUMN market TEXT DEFAULT 'kr'",
                     "ALTER TABLE decisions ADD COLUMN name TEXT",
                     "ALTER TABLE bot_positions ADD COLUMN qty INTEGER",                # 봇이 산 수량
-                    "ALTER TABLE bot_positions ADD COLUMN avg REAL"):                   # 봇 평단                    # 종목명  # 국내/미국
+                    "ALTER TABLE bot_positions ADD COLUMN avg REAL",
+                    # 체결 확인 (v0.14): 실제 체결 수량·평균가·상태·수수료·세금
+                    "ALTER TABLE orders ADD COLUMN status TEXT",
+                    "ALTER TABLE orders ADD COLUMN filled_qty REAL",
+                    "ALTER TABLE orders ADD COLUMN fill_price REAL",
+                    "ALTER TABLE orders ADD COLUMN fee REAL",
+                    "ALTER TABLE orders ADD COLUMN tax REAL"):                   # 봇 평단                    # 종목명  # 국내/미국
             try:
                 self.db.execute(sql)
                 self.db.commit()
@@ -98,10 +104,29 @@ class Journal:
                 r["name"] = nm.get(r.get("code") or "", "")
         return rows
 
-    def add_order(self, mode, side, code, name, qty, est_price, res, trigger) -> None:
-        self.db.execute("INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
-            now().isoformat(timespec="seconds"), mode, side, code, name, qty, est_price,
-            res.order_no, int(res.ok), res.message, trigger))
+    def add_order(self, mode, side, code, name, qty, est_price, res, trigger, status: str | None = None) -> int:
+        """status: sent(체결 확인 대기) · filled(체결로 간주) · failed. 반환: rowid"""
+        if status is None:
+            status = "failed" if not res.ok else ("filled" if res.order_no == "DRY" else "sent")
+        filled = qty if status == "filled" else 0
+        cur = self.db.execute(
+            "INSERT INTO orders(ts,mode,side,code,name,qty,est_price,order_no,ok,message,trigger,status,filled_qty,"
+            "fill_price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                now().isoformat(timespec="seconds"), mode, side, code, name, qty, est_price,
+                res.order_no, int(res.ok), res.message, trigger, status, filled, est_price if filled else None))
+        self.db.commit()
+        return cur.lastrowid
+
+    def open_orders(self, mode: str) -> list[dict]:
+        return [dict(r, rowid=r["rowid"]) for r in self.db.execute(
+            "SELECT rowid, * FROM orders WHERE mode=? AND ok=1 AND status IN ('sent','open','partial') ORDER BY ts",
+            (mode,))]
+
+    def update_fill(self, rowid: int, status: str, filled: float, price: float | None,
+                    fee: float | None = None, tax: float | None = None) -> None:
+        self.db.execute("UPDATE orders SET status=?, filled_qty=?, fill_price=COALESCE(?, fill_price), "
+                        "fee=COALESCE(?, fee), tax=COALESCE(?, tax) WHERE rowid=?",
+                        (status, filled, price or None, fee, tax, rowid))
         self.db.commit()
 
     def orders_today(self, mode: str) -> int:

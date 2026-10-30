@@ -154,7 +154,7 @@
   </div>
 </div>
 
-<div class="card sec" id="schedule" data-sum="🇰🇷 {{ sched.kr }}{{ (' · 🇺🇸 ' ~ sched.us) if c.us_enabled }}">
+<div class="card sec" id="schedule" data-sum="🇰🇷 {{ sched.kr }}{{ (' · 🇺🇸 ' ~ sched.us) if c.us_enabled }} · 장중 감시 {{ (watch_min ~ '분') if watch_min else '끔' }}">
   <h2 class="sec-head">자동 실행 시각</h2>
   <form method="post" action="{{ url_for('schedule_save') }}">
     <div class="grid2">
@@ -163,11 +163,19 @@
       <div><label for="sched_us">🇺🇸 미국 — 뉴욕시간 (09:40~15:50)</label>
         <input id="sched_us" name="sched_us" value="{{ sched.us }}" placeholder="10:00, 12:30, 15:00"></div>
     </div>
+    <label for="watch_minutes" style="margin-top:12px">장중 손절 감시 — AI 없이 손절·익절만 (토큰 0)</label>
+    <select id="watch_minutes" name="watch_minutes">
+      {% for m in [0, 10, 15, 20, 30] %}<option value="{{ m }}" {{ 'selected' if watch_min == m }}>{{ '끄기' if m == 0 else (m ~ '분마다') }}</option>{% endfor %}
+    </select>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:6px;color:var(--fg);font-size:13px">
+      <input type="checkbox" name="watch_apply" style="width:auto"> 장중 감시 타이머를 다시 설치·적용 (처음 켤 때 체크)</label>
     <div class="row" style="margin-top:10px"><button class="btn">저장하고 타이머에 적용</button></div>
   </form>
   <div class="mute" style="margin-top:8px">평일만, 쉼표로 구분해 하루 1~6번 (간격 30분 이상). 저장하면 서버 타이머에 바로 적용돼요.
     미국은 뉴욕 시간 기준이라 서머타임이 자동 반영돼요 (뉴욕 10:00 = 한국 23:00/00:00).
-    횟수를 늘리면 AI 호출과 주문 기회가 늘어요 — 하루 주문 한도는 ‘예산 · 위험관리’에서.</div>
+    횟수를 늘리면 AI 호출과 주문 기회가 늘어요 — 하루 주문 한도는 ‘예산 · 위험관리’에서.<br>
+    <b>장중 감시</b>는 정해진 실행 사이에도 봇 보유 종목이 손절선에 닿으면 바로 팔아요 (손절은 시장가, 하루 주문 한도와 무관).
+    익절도 확인하고, 30분 넘게 체결 안 된 봇 주문은 정리해요.</div>
 </div>
 
 <div class="card sec" id="notify" data-sum="{{ ['텔레그램' if tg_ready, '카카오톡' if kakao]|select|join(' · ') or '연결 안 됨' }}">
@@ -257,6 +265,34 @@
   });
 })();
 </script>
+
+<div class="card sec" id="backup" data-sum="{% if backups %}마지막 {{ backups[0].ts }} · {{ backups|length }}개 보관 ({{ bk.keep_days }}일){% else %}아직 없음{% endif %}{{ ' · 추가 위치 ' ~ bk.extra_dir if bk.extra_dir }}">
+  <h2 class="sec-head">백업</h2>
+  <div class="mute">하루 한 번 자동으로 매매 기록(journal.db)·설정을 zip 으로 백업해요. 앱키·비밀번호(.env)는 기본으로 빼요.</div>
+  <form method="post" action="{{ url_for('backup_now') }}" style="margin-top:8px"><button class="btn">💾 지금 백업</button></form>
+  {% if backups %}
+  <div class="scroll" style="margin-top:8px"><table>
+    <tr><th>백업</th><th class="r">크기</th><th></th></tr>
+    {% for b in backups[:10] %}
+    <tr><td class="nw">{{ b.ts }}<div class="mute" style="font-size:11px">{{ b.name }}</div></td>
+      <td class="r">{{ "{:,.0f}".format(b.size / 1024) }}KB</td>
+      <td class="r"><a href="{{ url_for('backup_download', name=b.name) }}">내려받기</a></td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+  <form method="post" action="{{ url_for('backup_settings') }}" style="margin-top:10px">
+    <div class="grid2">
+      <div><label for="keep_days">보관 기간 (일)</label><input id="keep_days" name="keep_days" value="{{ bk.keep_days }}" inputmode="numeric"></div>
+      <div><label for="extra_dir">추가 저장 위치 (선택 — NAS·다른 디스크)</label>
+        <input id="extra_dir" name="extra_dir" value="{{ bk.extra_dir }}" placeholder="/mnt/nas/ai-trader-backup" spellcheck="false"></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--fg);font-size:13px">
+      <input type="checkbox" name="include_env" style="width:auto" {{ 'checked' if bk.include_env }}> .env(앱키·비밀번호)도 포함 — 백업 파일을 안전한 곳에만 둘 때</label>
+    <div class="row" style="margin-top:8px"><button class="btn">백업 설정 저장</button></div>
+  </form>
+  <div class="mute" style="margin-top:8px">복원: 서비스를 멈추고 zip 의 <code>data/journal.db</code>·<code>config.toml</code> 을 <code>/opt/ai-trader</code> 의 같은 위치에 덮어쓴 뒤 다시 시작하세요.
+    같은 서버 디스크에만 있으면 디스크가 망가질 때 함께 잃으니, 추가 저장 위치를 넣어 두는 걸 권해요.</div>
+</div>
 
 <div class="card sec" id="update" data-sum="v{{ app_version }}{{ (' → 새 버전 v' ~ upd.latest) if upd and upd.behind }}">
   <h2 class="sec-head">업데이트</h2>
