@@ -101,6 +101,31 @@ def _start_job(kind: str, market: str = "kr") -> str | None:
     return None
 
 
+# ── 앱(PWA) — 홈 화면에 추가했을 때 이름·아이콘·전체 화면 ─────
+@app.get("/manifest.webmanifest")
+def manifest():
+    st = lambda f: url_for("static", filename=f)  # noqa: E731
+    data = {
+        "name": "AI 자동매매", "short_name": "AI 자동매매", "lang": "ko", "start_url": "/", "scope": "/",
+        "display": "standalone", "background_color": "#0f172a", "theme_color": "#141a24",
+        "icons": [{"src": st("icon-192.png"), "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                  {"src": st("icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                  {"src": st("icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+    }
+    import json as _json
+    return app.response_class(_json.dumps(data, ensure_ascii=False), mimetype="application/manifest+json")
+
+
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+@app.get("/favicon.ico")
+def root_icons():
+    """iOS·브라우저가 사이트 루트에서 직접 찾는 아이콘."""
+    from flask import send_from_directory
+    f = "favicon.png" if request.path.endswith(".ico") else "apple-touch-icon.png"
+    return send_from_directory(app.static_folder, f, mimetype="image/png", max_age=86400)
+
+
 # ── 인증 ───────────────────────────────────────────────
 def login_required(fn):
     @wraps(fn)
