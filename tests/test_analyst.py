@@ -143,12 +143,34 @@ def test_consensus_tolerates_one_failure():
     c = A.ConsensusAnalyst([Ok("Claude", "BUY"), Ok("Gemini", "BUY"), Bad()])
     out = c.decide(CTX)
     assert out["decisions"][0]["action"] == "BUY" and "응답 실패" in out["market_view"]
+    out = A.ConsensusAnalyst([Ok("Claude", "BUY"), Bad(), Bad()]).decide(CTX)
+    assert out["decisions"][0]["action"] == "HOLD" and "매수 보류" in out["decisions"][0]["reason"]  # 1개 응답 → 매수 안 함
+    out = A.ConsensusAnalyst([Ok("Claude", "SELL"), Bad()]).decide(CTX)
+    assert out["decisions"][0]["action"] == "SELL" and "Claude만 응답" in out["_provider"]    # 매도는 따름
     try:
-        A.ConsensusAnalyst([Ok("Claude", "BUY"), Bad(), Bad()]).decide(CTX)
+        A.ConsensusAnalyst([Bad(), Bad()]).decide(CTX)
     except RuntimeError:
         pass
     else:
-        raise AssertionError("응답 1개로는 판단하면 안 됨")
+        raise AssertionError("응답이 없으면 판단하면 안 됨")
+
+
+def test_read_timeout_retried_once():
+    import requests
+    calls = []
+    orig = A.requests.post
+
+    def slow(url, **kw):
+        calls.append(1)
+        raise requests.ReadTimeout()
+    A.requests.post = slow
+    try:
+        A.post_with_retry("https://x", timeout=1)
+    except RuntimeError as e:
+        assert "응답 없음" in str(e)
+    finally:
+        A.requests.post = orig
+    assert len(calls) == 2
 
 
 def test_make_analyst_requires_key():

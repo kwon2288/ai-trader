@@ -138,13 +138,20 @@ CONSENSUS_DEADLINE = 360     # 초 — 다수결에서 모든 AI 응답을 기�
 
 
 def post_with_retry(url: str, **kw) -> requests.Response:
-    """일시적 오류(혼잡·한도·서버오류·네트워크)는 기다렸다가 최대 3번 더 시도."""
+    """일시적 오류(혼잡·한도·서버오류·네트워크)는 기다렸다가 최대 3번 더 시도.
+    단, 응답 대기 시간 초과(ReadTimeout)는 한 번만 다시 시도 — 매번 수 분씩 기다리면 실행이 멈춘 것처럼 보인다."""
+    read_timeouts = 0
     for i, wait in enumerate([0] + RETRY_WAITS):
         if wait:
             log.info("AI 서버 일시 오류 → %s초 후 재시도 (%d/%d)", wait, i, len(RETRY_WAITS))
             time.sleep(wait)
         try:
             r = requests.post(url, **kw)
+        except requests.ReadTimeout:
+            read_timeouts += 1
+            if read_timeouts >= 2 or i == len(RETRY_WAITS):
+                raise RuntimeError(f"응답 없음 ({kw.get('timeout')}초 × {read_timeouts}번 기다림)") from None
+            continue
         except (requests.ConnectionError, requests.Timeout):
             if i == len(RETRY_WAITS):
                 raise
@@ -366,8 +373,22 @@ class ConsensusAnalyst:
             except Exception as e:  # noqa: BLE001
                 self.errors.append(f"{m.label}: {e}")
         ex.shutdown(wait=False, cancel_futures=True)     # 늦은 AI 는 기다리지 않음
+        if not results:
+            raise RuntimeError("모든 AI 가 응답하지 않았습니다 → " + "; ".join(self.errors))
         if len(results) < 2:
-            raise RuntimeError("다수결에 필요한 응답이 2개 미만입니다 → " + "; ".join(self.errors))
+            # 1개만 응답: 사는 건 다수결 없이 하지 않고, 파는 것(위험을 줄이는 쪽)만 그 AI 의견을 따른다
+            one = results[0]
+            who = one["_provider"].split("(")[0]
+            decs = []
+            for d in one["decisions"]:
+                if d["action"] == "BUY":
+                    d = {**d, "action": "HOLD", "amount_krw": 0,
+                         "reason": f"[{who}만 응답 → 매수 보류] {d['reason']}"}
+                else:
+                    d = {**d, "reason": f"[{who}만 응답] {d['reason']}"}
+                decs.append(d)
+            return {"market_view": f"{who}: {one['market_view']} (응답 실패: {'; '.join(self.errors)} → 매도만 반영)",
+                    "decisions": decs, "_provider": f"다수결({who}만 응답)", "_usage": one.get("_usage")}
         out = merge_votes(results)
         if self.errors:
             out["market_view"] += f" (응답 실패: {'; '.join(self.errors)})"
