@@ -292,7 +292,7 @@ cd /opt/ai-trader
 bash deploy/update.sh      # git pull → 패키지 설치 → 웹 화면 재시작
 ```
 
-버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 있습니다. 지금 버전은 `.venv/bin/python run.py --version` 또는 웹 화면 맨 아래에서 확인할 수 있어요.
+버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 있습니다. 버전 태그(`v0.13.6` 등)는 서버에서 `bash deploy/tag-versions.sh` 한 번으로 빠진 것만 달고 GitHub에 올릴 수 있어요. 지금 버전은 `.venv/bin/python run.py --version` 또는 웹 화면 맨 아래에서 확인할 수 있어요.
 
 `.env`, `config.toml`, `data/`는 git에 없으므로 업데이트해도 그대로 유지됩니다.
 자동 실행(타이머)은 매번 새로 시작하므로 따로 재시작할 필요가 없습니다.
