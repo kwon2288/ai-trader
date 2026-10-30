@@ -18,16 +18,19 @@ class Busy(RuntimeError):
 
 
 @contextmanager
-def run_lock(cfg: Config):
+def run_lock(cfg: Config, what: str = "실행", market: str = ""):
+    from . import runstatus
     fh = open(cfg.data_dir / "run.lock", "w")
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
         raise Busy("다른 실행이 진행 중입니다. 잠시 후 다시 시도하세요.") from None
+    runstatus.start(cfg.data_dir, what, market)
     try:
         yield
     finally:
+        runstatus.end(cfg.data_dir)
         fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
 
@@ -79,7 +82,7 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
               market: str = "kr") -> str:
     """한 사이클 실행 후 결과 텍스트 반환. 결과는 일지(run_logs)에도 남긴다."""
     kind = "analyze" if analyze_only else "trade"
-    with run_lock(cfg):
+    with run_lock(cfg, "AI 분석(주문 없음)" if analyze_only else ("정기 매매" if source == "timer" else "매매 실행"), market):
         j = Journal(cfg.db_path)
         try:
             cfg = market_cfg(cfg, market)
@@ -118,7 +121,7 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
 def run_watch(cfg: Config, market: str = "kr", source: str = "timer") -> str:
     """장중 감시 (AI 없음) — 다른 실행 중이면 조용히 건너뛴다. 무언가 했을 때만 실행 로그에 남긴다."""
     try:
-        lock = run_lock(cfg)
+        lock = run_lock(cfg, "장중 감시", market)
         lock.__enter__()
     except Busy:
         return "다른 실행 중 — 건너뜀"
@@ -214,7 +217,7 @@ def refresh_balance(cfg: Config, market: str = "kr") -> dict:
 def run_scan(cfg: Config, source: str = "web") -> str:
     """자동 종목 다시 찾기 (잠금 + 실행 로그)."""
     from . import universe
-    with run_lock(cfg):
+    with run_lock(cfg, "종목 찾기"):
         j = Journal(cfg.db_path)
         try:
             r = universe.scan(cfg, make_broker(cfg), j)

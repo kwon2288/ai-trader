@@ -86,6 +86,30 @@ def _busy(c) -> bool:
         return True
 
 
+def _busy_info(c) -> dict | None:
+    """지금 실행 중인 것: 무엇·몇 분째·지금 단계·멈춘 듯한지. 아무것도 없으면 None."""
+    from trader import runstatus
+    if not _busy(c):
+        return None
+    st = runstatus.read(c.data_dir)
+    now_ = time.time()
+    if _job.get("running") and _job.get("kind") == "backtest":
+        started = _job.get("started") or now_
+        return {"what": "백테스트", "market": "", "step": _job.get("progress", ""), "min": int((now_ - started) // 60),
+                "stale": False, "stoppable": False}
+    if st and not st.get("done") and runstatus.alive(st.get("pid")):
+        mins = int((now_ - (st.get("started") or now_)) // 60)
+        idle = int((now_ - (st.get("step_ts") or now_)) // 60)
+        return {"what": st.get("what", "실행"), "market": st.get("market", ""), "step": st.get("step", ""),
+                "min": mins, "idle": idle, "stale": mins >= runstatus.STALE_MIN, "stoppable": mins >= runstatus.STALE_MIN,
+                "inproc": st.get("pid") == os.getpid()}
+    started = _job.get("started") or now_
+    mins = int((now_ - started) // 60)
+    return {"what": {"trade": "매매 실행", "analyze": "AI 분석", "scan": "종목 찾기"}.get(_job.get("kind"), "실행"),
+            "market": "", "step": "", "min": mins, "stale": mins >= runstatus.STALE_MIN,
+            "stoppable": mins >= runstatus.STALE_MIN, "inproc": bool(_job.get("running"))}
+
+
 def _start_job(kind: str, market: str = "kr", params: dict | None = None) -> str | None:
     c = cfg()
     with _job_lock:
@@ -266,7 +290,7 @@ def index():
     return render_template(
         "index.html", c=c, base=base, market=m, broker=broker_name(c), missed=missed,
         watch_last=(j.get(f"watch_last_{c.ledger}") or "")[11:16],
-        snap=snap, stopped=stopped, halted=halted, busy=_busy(c), job=_job,
+        snap=snap, stopped=stopped, halted=halted, busy=_busy_info(c), job=_job,
         next_run=fmt_kst(next_run(now) if m == "kr" else next_run_us(now)),
         chart=equity_svg(j.equity_series(c.ledger), c.total_krw),
         runs=j.runs_with_decisions(c.ledger, 5), orders=j.orders(c.ledger, 10),
@@ -1530,7 +1554,44 @@ def action(name):
 def api_status():
     c = cfg()
     logs = Journal(c.db_path).logs(1)
-    return jsonify(busy=_busy(c), last_log_id=logs[0]["id"] if logs else None)
+    info = _busy_info(c)
+    return jsonify(busy=bool(info), info=info, last_log_id=logs[0]["id"] if logs else None)
+
+
+@app.post("/run/stop")
+@login_required
+def run_stop():
+    """15분 넘게 끝나지 않는 실행 정리 — 봇 프로세스(run.py)만 멈추고, 웹 안에서 돌던 건 웹을 다시 시작해 끊는다."""
+    import signal
+    from trader import runstatus
+    c = cfg()
+    info = _busy_info(c)
+    if not info:
+        flash("실행 중인 작업이 없어요.", "ok")
+        return redirect(url_for("index"))
+    if not info.get("stoppable"):
+        flash(f"아직 {runstatus.STALE_MIN}분이 안 됐어요 — 조금 더 기다려 주세요.", "err")
+        return redirect(url_for("index"))
+    st = runstatus.read(c.data_dir)
+    pid = st.get("pid")
+    j = Journal(c.db_path)
+    msg = f"⛔ 멈춘 실행 정리: {info['what']} ({info['min']}분째, 마지막 단계: {info.get('step') or '-'})"
+    if info.get("inproc") or pid == os.getpid():
+        j.add_log(c.ledger, "stop", "web", msg + " — 웹을 다시 시작해 끊음")
+        _job.update(running=False)
+        _restart_soon()
+        return render_template("restarting.html", title="멈춘 실행을 정리하는 중")
+    if pid and runstatus.alive(pid) and runstatus.is_trader_process(pid):
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except OSError as e:
+            flash(f"멈추지 못했어요: {e}", "err")
+            return redirect(url_for("index"))
+        j.add_log(c.ledger, "stop", "web", msg + f" — 프로세스 {pid} 종료")
+        flash("멈춘 실행을 정리했어요. 기록 → 실행 로그에서 어디서 멈췄는지 볼 수 있어요.", "ok")
+    else:
+        flash("정리할 봇 프로세스를 찾지 못했어요. 서버에서 확인이 필요해요.", "err")
+    return redirect(url_for("index"))
 
 
 def main():

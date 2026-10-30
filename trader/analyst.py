@@ -133,6 +133,8 @@ def normalize(raw: dict, provider: str) -> dict:
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
 RETRY_WAITS = [10, 30, 60]   # 초 — 서버 혼잡(503)·한도(429)는 대개 잠깐이면 풀린다
+AI_TIMEOUT = 150             # 초 — AI 한 번 호출의 최대 대기
+CONSENSUS_DEADLINE = 360     # 초 — 다수결에서 모든 AI 응답을 기다리는 최대 시간 (늦은 AI 는 실패로 침)
 
 
 def post_with_retry(url: str, **kw) -> requests.Response:
@@ -161,7 +163,8 @@ class ClaudeAnalyst:
 
     def __init__(self, model: str, max_tokens: int = 4000):
         import anthropic
-        self.client = anthropic.Anthropic(max_retries=4)  # ANTHROPIC_API_KEY, 혼잡·한도 시 SDK가 자동 재시도
+        # ANTHROPIC_API_KEY. 혼잡·한도 시 SDK가 자동 재시도 — 응답이 없을 때 한없이 기다리지 않게 시간 제한
+        self.client = anthropic.Anthropic(max_retries=2, timeout=AI_TIMEOUT)
         self.model, self.max_tokens = model, max_tokens
         self.label = f"Claude({model})"
 
@@ -227,7 +230,7 @@ class GeminiAnalyst:
             "generationConfig": {"responseMimeType": "application/json",
                                  "maxOutputTokens": max(self.max_tokens, 8000)},
         }
-        r = post_with_retry(self.URL.format(model=self.model), json=body, timeout=180,
+        r = post_with_retry(self.URL.format(model=self.model), json=body, timeout=AI_TIMEOUT,
                           headers={"x-goog-api-key": self.key, "Content-Type": "application/json"})
         data = r.json() if r.content else {}
         if r.status_code != 200:
@@ -259,7 +262,7 @@ class OpenAIAnalyst:
         self.label = f"ChatGPT({model})"
 
     def _post(self, ctx: dict, fmt: dict) -> requests.Response:
-        return post_with_retry(self.URL, timeout=240, headers={"Authorization": f"Bearer {self.key}"}, json={
+        return post_with_retry(self.URL, timeout=AI_TIMEOUT + 60, headers={"Authorization": f"Bearer {self.key}"}, json={
             "model": self.model,
             "instructions": SYSTEM + ("" if fmt.get("type") == "json_schema" else JSON_HINT),
             "input": build_prompt(ctx),
@@ -348,16 +351,21 @@ class ConsensusAnalyst:
         self.errors: list[str] = []
 
     def decide(self, ctx: dict) -> dict:
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, wait
         self.errors = []
         results = []
-        with ThreadPoolExecutor(max_workers=len(self.members)) as ex:
-            futs = {ex.submit(m.decide, ctx): m for m in self.members}
-            for f, m in futs.items():
-                try:
-                    results.append(f.result())
-                except Exception as e:  # noqa: BLE001
-                    self.errors.append(f"{m.label}: {e}")
+        ex = ThreadPoolExecutor(max_workers=len(self.members))
+        futs = {ex.submit(m.decide, ctx): m for m in self.members}
+        wait(futs, timeout=CONSENSUS_DEADLINE)
+        for f, m in futs.items():
+            if not f.done():
+                self.errors.append(f"{m.label}: {CONSENSUS_DEADLINE // 60}분 안에 응답 없음")
+                continue
+            try:
+                results.append(f.result())
+            except Exception as e:  # noqa: BLE001
+                self.errors.append(f"{m.label}: {e}")
+        ex.shutdown(wait=False, cancel_futures=True)     # 늦은 AI 는 기다리지 않음
         if len(results) < 2:
             raise RuntimeError("다수결에 필요한 응답이 2개 미만입니다 → " + "; ".join(self.errors))
         out = merge_votes(results)

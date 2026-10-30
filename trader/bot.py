@@ -57,6 +57,11 @@ class Bot:
     def say(self, s: str) -> None:
         log.info(s)
         self.lines.append(s)
+        try:
+            from . import runstatus
+            runstatus.step(self.cfg.data_dir, s)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _mk(self) -> str:
         return {"kr": "🇰🇷", "us": "🇺🇸"}.get(self.cfg.market, "") + ("" if self.cfg.mode == "live" else
@@ -404,6 +409,7 @@ class Bot:
             "candidates": candidates,
             "recent_decisions": self.j.recent_decisions(mode=cfg.ledger),
         }
+        self.say(f"🧠 {getattr(self.analyst, 'label', 'AI')} 에게 {len(candidates)}종목 판단 요청 중…")
         try:
             result = self.analyst.decide(ctx)
         except Exception as e:  # noqa: BLE001

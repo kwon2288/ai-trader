@@ -13,12 +13,20 @@
     {% if broker == 'toss' and c.mode == 'mock' %}<a class="badge b-err" href="{{ url_for('settings') }}#mode">⚠ 토스는 모의투자 없음 → 모드 바꾸기</a>{% endif %}
     <span class="badge">🧠 {{ {'claude':'Claude','gemini':'Gemini','openai':'ChatGPT','consensus':'다수결','rules':'규칙만'}.get(c.ai_provider, c.ai_provider) }}{% if c.ai_hybrid and c.ai_provider != 'rules' %} + 규칙필터{% endif %}{% if c.ai_news and c.ai_provider != 'rules' %} + 📰{% endif %}</span>
 
-    {% if busy %}<span class="badge b-warn" id="busy">⏳ 실행 중…</span>
+    {% if busy %}<span class="badge {{ 'b-err' if busy.stale else 'b-warn' }}" id="busy">⏳ <span id="busy-what">{{ busy.what }}{{ ' · ' ~ {'kr':'국내','us':'미국'}.get(busy.market, '') if busy.market }} · {{ busy.min }}분째</span></span>
     {% elif halted %}<span class="badge b-err">🛑 손실 한도로 정지</span>
     {% elif stopped %}<span class="badge b-warn">⏸ 정지됨</span>
     {% else %}<span class="badge b-ok">● 자동 실행 대기</span>{% endif %}
     {% if missed %}<span class="badge b-err">⏰ 오늘 {{ missed|join(', ') }} 실행 누락{% if market == 'us' %} (뉴욕){% endif %}</span>{% endif %}
   </div>
+  {% if busy %}
+  <div class="mute" style="margin-top:6px" id="busy-step">{% if busy.step %}지금: {{ busy.step }}{% endif %}</div>
+  <div id="busy-stale" class="flash" style="margin:8px 0 0;background:var(--errbg);color:var(--err);{{ '' if busy.stale else 'display:none' }}">
+    15분 넘게 끝나지 않아요 — AI·증권사 응답을 기다리다 멈췄을 수 있어요.
+    <form method="post" action="{{ url_for('run_stop') }}" class="inline" style="margin-left:6px"
+      onsubmit="return confirm('실행 중인 작업을 멈출까요? 이미 보낸 주문은 취소되지 않아요. 다음 회차는 정상적으로 실행돼요.')">
+      <button class="btn" style="padding:4px 10px;font-size:13px">⛔ 멈춘 실행 정리</button></form></div>
+  {% endif %}
   <div class="mute" style="margin-top:6px">
     다음 자동 실행 {{ next_run }}{% if market == 'us' %} (한국시간){% endif %}{% if watch_last %} · 장중 감시 {{ watch_last }}{% endif %} · <a href="{{ url_for('settings') }}#schedule" class="mute">시각 바꾸기</a>
     {% if stopped or halted %} — 정지 상태라 건너뜁니다{% endif %}
@@ -195,7 +203,12 @@
     try {
       const r = await fetch('{{ url_for("api_status") }}');
       const s = await r.json();
-      if (!s.busy) { clearInterval(t); location.reload(); }
+      if (!s.busy) { clearInterval(t); location.reload(); return; }
+      const i = s.info || {};
+      const mk = {kr: '국내', us: '미국'}[i.market];
+      const w = document.getElementById('busy-what'); if (w) w.textContent = (i.what || '실행') + (mk ? ' · ' + mk : '') + ' · ' + (i.min || 0) + '분째';
+      const st = document.getElementById('busy-step'); if (st) st.textContent = i.step ? '지금: ' + i.step : '';
+      const sl = document.getElementById('busy-stale'); if (sl && i.stale) sl.style.display = '';
     } catch (e) {}
   }, 5000);
 })();
