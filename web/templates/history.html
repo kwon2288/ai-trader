@@ -18,8 +18,8 @@
   {% else %}<div class="mute">없음</div>{% endfor %}
 </div>
 
-<div class="card">
-  <h2>실행 로그</h2>
+<div class="card sec" id="logs" data-sum="{% if logs %}최근 {{ logs|length }}건 · 마지막 {{ logs[0].ts[5:16].replace('T',' ') }}{% else %}없음{% endif %} — 눌러서 보기">
+  <h2 class="sec-head">실행 로그</h2>
   {% for l in logs %}{{ log_item(l) }}{% else %}<div class="mute">없음</div>{% endfor %}
 </div>
 {% endblock %}
