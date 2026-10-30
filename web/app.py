@@ -147,7 +147,7 @@ def _monitor_loop():
             monitor.check(j, c, raw, notify.send)
             from trader import backup
             if datetime.now(KST).hour >= 18:           # 장 끝난 뒤 오늘 백업이 아직 없으면
-                backup.daily(j, c.data_dir, raw)
+                backup.daily(j, c.data_dir, raw, warn=lambda m: notify.send(c, "errors", m))
         except Exception as e:  # noqa: BLE001
             app.logger.warning("누락 감시·백업 오류: %s", e)
 
@@ -604,6 +604,8 @@ def settings():
                            kakao_redirect=_public_base() + url_for("kakao_callback"),
                            backups=__import__("trader.backup", fromlist=["x"]).listing(cfg().data_dir),
                            bk=__import__("trader.backup", fromlist=["x"]).settings(raw),
+                           rmt=__import__("trader.remote", fromlist=["x"]).settings(raw),
+                           rmt_types=__import__("trader.remote", fromlist=["x"]).TYPES,
                            passkey_list=__import__("web.passkeys", fromlist=["x"]).load(cfg().data_dir),
                            acct_choice=session.get("acct_choice"),
                            mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
@@ -900,6 +902,17 @@ def backup_download(name):
     return send_from_directory(backup.folder(cfg().data_dir), name, as_attachment=True)
 
 
+@app.post("/backup/test")
+@login_required
+def backup_test():
+    from trader import remote
+    try:
+        flash("🔌 " + remote.test(settings_io.read(CONFIG_PATH)), "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"원격 저장 연결 실패: {e}", "err")
+    return redirect(url_for("settings") + "#backup")
+
+
 @app.post("/backup/settings")
 @login_required
 def backup_settings():
@@ -912,10 +925,33 @@ def backup_settings():
     if extra and not extra.startswith("/"):
         flash("추가 저장 위치는 / 로 시작하는 서버 경로여야 합니다 (예: /mnt/nas/ai-trader).", "err")
         return redirect(url_for("settings") + "#backup")
+    from trader import envfile, remote
+    rtype = (request.form.get("remote_type") or "").lower()
+    rurl = (request.form.get("remote_url") or "").strip()
+    ruser = (request.form.get("remote_user") or "").strip()
+    if rtype not in remote.TYPES:
+        rtype = ""
+    err = remote.check_url(rtype, rurl) if rtype else None
+    if err or any(ch in rurl + ruser for ch in '"\n\r'):
+        flash(err or "주소·사용자에 따옴표나 줄바꿈은 넣을 수 없습니다.", "err")
+        return redirect(url_for("settings") + "#backup")
     text = settings_io._set(text, "backup", "keep_days", keep)
     text = settings_io._set(text, "backup", "extra_dir", extra)
     text = settings_io._set(text, "backup", "include_env", bool(request.form.get("include_env")))
+    text = settings_io._set(text, "backup", "remote_type", rtype)
+    text = settings_io._set(text, "backup", "remote_url", rurl)
+    text = settings_io._set(text, "backup", "remote_user", ruser)
     CONFIG_PATH.write_text(text, encoding="utf-8")
+    pw = request.form.get("remote_password") or ""
+    if pw or request.form.get("clear_remote_password"):
+        if pw and envfile.check_value(pw):
+            flash("비밀번호에 따옴표·역슬래시·줄바꿈은 쓸 수 없습니다.", "err")
+        else:
+            envfile.update({"BACKUP_REMOTE_PASSWORD": pw or None})
+            if pw:
+                os.environ["BACKUP_REMOTE_PASSWORD"] = pw
+            else:
+                os.environ.pop("BACKUP_REMOTE_PASSWORD", None)
     flash("백업 설정을 저장했습니다.", "ok")
     return redirect(url_for("settings") + "#backup")
 

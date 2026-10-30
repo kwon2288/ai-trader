@@ -107,7 +107,9 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
                 import tomllib
                 from . import backup
                 from .config import ensure_config
-                backup.daily(j, cfg.data_dir, tomllib.loads(ensure_config().read_text(encoding="utf-8")))
+                from . import notify as _nt
+                backup.daily(j, cfg.data_dir, tomllib.loads(ensure_config().read_text(encoding="utf-8")),
+                             warn=lambda m: _nt.send(cfg, "errors", m))
             except Exception as e:  # noqa: BLE001
                 j.add_log(cfg.ledger, "backup", source, f"⚠ 백업 실패: {e}")
         return out

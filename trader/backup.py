@@ -2,7 +2,7 @@
 
 zip 안에: journal.db(매매·판단·손익 기록, 실행 중에도 안전한 SQLite 백업), config.toml(설정),
          mode.json·ai_cost.json·passkeys.json(웹 설정). .env(앱키·비밀번호)는 기본으로 넣지 않는다.
-저장 위치: data/backups/  (+ config [backup] extra_dir 를 주면 그곳에도 복사 — NAS·다른 디스크 권장)
+저장 위치: data/backups/  (+ extra_dir 로 다른 디스크에 복사, + FTP/FTPS/WebDAV 로 NAS·클라우드에 업로드 — trader/remote.py)
 보관: keep_days 일이 지난 백업은 지운다.
 """
 from __future__ import annotations
@@ -74,6 +74,13 @@ def make(data_dir: Path, raw: dict) -> tuple[Path, list[str]]:
             prune(ext, st["keep_days"])
         except Exception as e:  # noqa: BLE001
             notes.append(f"추가 위치 복사 실패: {e}")
+    try:                                             # FTP / WebDAV
+        from . import remote
+        m = remote.upload(raw, out, st["keep_days"])
+        if m:
+            notes.append(m)
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"원격 업로드 실패: {e}")
     prune(folder(data_dir), st["keep_days"])
     return out, notes
 
@@ -94,11 +101,14 @@ def listing(data_dir: Path) -> list[dict]:
             for f in sorted(folder(data_dir).glob("ai-trader-*.zip"), reverse=True)]
 
 
-def daily(j, data_dir: Path, raw: dict) -> Path | None:
-    """오늘 백업이 없으면 하나 만든다 (자동 실행·웹이 부름)."""
+def daily(j, data_dir: Path, raw: dict, warn=None) -> Path | None:
+    """오늘 백업이 없으면 하나 만든다 (자동 실행·웹이 부름). warn(msg): 원격·추가 위치 실패 알림."""
     today = datetime.now(KST).date().isoformat()
     if j.get("backup_last") == today:
         return None
-    p, _ = make(data_dir, raw)
+    p, notes = make(data_dir, raw)
     j.set("backup_last", today)
+    bad = [n for n in notes if "실패" in n]
+    if bad and warn:
+        warn("💾 백업은 서버에 저장됐지만 " + "; ".join(bad))
     return p

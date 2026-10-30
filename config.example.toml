@@ -123,3 +123,6 @@ us_fee_pct = 0.25         # 미국 수수료 (매수·매도 각각)
 keep_days = 14        # 보관 기간 (일)
 extra_dir = ""        # 추가 저장 위치 (예: "/mnt/nas/ai-trader-backup") — 비우면 data/backups 에만
 include_env = false   # .env(앱키·비밀번호)도 포함할지
+remote_type = ""      # 원격 저장: "" | "ftp" | "ftps" | "webdav"  (비밀번호는 .env 의 BACKUP_REMOTE_PASSWORD)
+remote_url = ""       # 예: "ftp://nas.local/backup/ai-trader" · "https://nas.local:5006/backup/ai-trader"
+remote_user = ""
