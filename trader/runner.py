@@ -91,8 +91,41 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
             out = bot.run(force=force, analyze_only=analyze_only)
         except Exception as e:  # noqa: BLE001
             out = f"❌ 실행 오류: {e}"
+            if not analyze_only:
+                from . import notify
+                flag = {"kr": "🇰🇷", "us": "🇺🇸"}.get(cfg.market, "")
+                notify.send(cfg, "errors", f"⚠ {flag} 자동매매 실행 오류\n{e}")
         j.add_log(cfg.ledger, kind, source, out)
+        if not analyze_only and source == "timer":
+            _daily_summary(cfg, j)
         return out
+
+
+def _daily_summary(cfg: Config, j: Journal) -> None:
+    """그날 마지막 정기 실행(국내 14시 이후 / 미국 뉴욕 14시 이후) 뒤 하루 요약 알림. 하루 한 번만."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from . import ledger, notify
+    if not notify.enabled(cfg, "daily") or not notify.channels(cfg.data_dir):
+        return
+    tz = ZoneInfo("America/New_York" if cfg.market == "us" else "Asia/Seoul")
+    now = datetime.now(tz)
+    key = f"daily_sent_{cfg.ledger}"
+    if now.hour < 14 or j.get(key) == now.date().isoformat():
+        return
+    j.set(key, now.date().isoformat())
+    snap = j.snapshot(cfg.ledger) or {}
+    today = ledger.period(j, cfg.ledger, now.date(), now.date())
+    flag = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(cfg.market, "")
+    lines = [f"📊 {flag} 오늘 마감 요약 ({now:%m/%d})",
+             f"오늘 주문: 매수 {today['buys']}건 · 매도 {today['n']}건",
+             f"오늘 실현 손익: {cfg.money(today['pnl'])}"]
+    if snap.get("budget") is not None:
+        lines.append(f"봇 손익(누적): {cfg.money(snap['pnl'])} ({snap['pnl_pct']:+.2f}%)")
+        lines.append(f"투자 중: {cfg.money(snap['invested'])} / 예산 {cfg.money(snap['budget'])}")
+    for p in snap.get("positions", [])[:5]:
+        lines.append(f" · {p['name']} {p['qty']}주 {p['pnl_pct']:+.1f}%")
+    notify.send(cfg, "daily", "\n".join(lines))
 
 
 def refresh_balance(cfg: Config, market: str = "kr") -> dict:
@@ -101,16 +134,12 @@ def refresh_balance(cfg: Config, market: str = "kr") -> dict:
     j = Journal(cfg.db_path)
     broker = make_broker(cfg)
     bal = broker.balance()
-    from .bot import Bot, account_view, own_holdings
+    from . import ledger
+    from .bot import account_view, own_holdings
     held = own_holdings(j, cfg, bal.holdings)
-    Bot(cfg, broker, None, j)._sync_budget()            # 웹에서 바꾼 원금 반영
-    cash = float(j.get(f"bot_cash_{cfg.ledger}") or cfg.total_krw)
-    cash = round(cash, 2) if cfg.currency == "USD" else int(cash)
-    equity = round(cash + sum(h.value for h in held.values()), 2)
+    st = ledger.status(j, cfg, held, bal.orderable_cash)
     snap = {
-        "equity": equity, "cash": cash,
-        "pnl_pct": round((equity / cfg.total_krw - 1) * 100, 2),
-        "account_cash": bal.orderable_cash if bal.orderable_cash != float("inf") else None,
+        **st,
         "positions": [{"code": c, "name": h.name, "qty": h.qty, "avg_price": h.avg_price,
                        "now_price": h.now_price, "pnl_pct": round(h.pnl_pct, 2)} for c, h in held.items()],
         "account": account_view(bal, held),

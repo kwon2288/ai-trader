@@ -50,6 +50,7 @@ class Config:
     market: str = "kr"                 # kr | us — 시장마다 예산·장부·손실한도가 따로
     currency: str = "KRW"
     us: dict = field(default_factory=dict)   # [us] 섹션 원본
+    notify: dict = field(default_factory=dict)   # [notify] 알림 종류 켜기/끄기
     # 실행 모드: "dry"(주문 안 냄) | "mock"(모의투자 주문) | "live"(실계좌 주문)
     mode: str = "dry"
     mode_source: str = "env"          # env=.env 의 TRADING_MODE, web=웹에서 바꿈(data/mode.json)
@@ -166,6 +167,7 @@ def load(config_path: Path | None = None) -> Config:
         auto_scan_pool=int(raw["universe"].get("auto_scan_pool", 200)),
         mode=mode, mode_source=mode_source, live_ack=live_ack,
         us=dict(raw.get("us", {})),
+        notify=dict(raw.get("notify", {})),
         data_dir=data_dir,
     )
     cfg.data_dir.mkdir(parents=True, exist_ok=True)

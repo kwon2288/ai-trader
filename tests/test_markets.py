@@ -67,8 +67,8 @@ def test_bot_us_ledger_is_separate_and_fractional_cash():
     ]), j).run()
     assert ("BUY", "F", 9) in br.orders, out                  # 100 // 10.37 = 9주
     assert not any(o[1] == "AAPL" for o in br.orders)
-    assert float(j.get("bot_cash_mock_us")) == round(300 - 9 * 10.37, 2)
-    assert j.get("bot_cash_mock") is None                     # 국내 장부는 그대로
+    assert j.bot_lots("us", "mock_us")["F"] == (9, 10.37)
+    assert j.bot_lots("kr", "mock") == {}                     # 국내 장부는 그대로
     assert "$" in out and "🇺🇸" in out
     assert j.bot_codes("us") == {"F": j.bot_codes("us")["F"]} and j.bot_codes("kr") == {}
 

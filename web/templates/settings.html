@@ -150,6 +150,47 @@
   </div>
 </div>
 
+<div class="card" id="notify">
+  <h2>알림 — 텔레그램 · 카카오톡</h2>
+  <div class="row" style="gap:6px">
+    <span class="badge {{ 'b-ok' if tg_ready else '' }}">텔레그램 {{ '연결됨' if tg_ready else ('채팅 ID 필요' if tg_token else '꺼짐') }}</span>
+    <span class="badge {{ 'b-ok' if kakao else '' }}">카카오톡 {{ ('연결됨 · ' ~ kakao.refresh_days ~ '일 남음') if kakao else '꺼짐' }}</span>
+  </div>
+  <form method="post" action="{{ url_for('notify_save') }}" style="margin-top:10px">
+    {% for k, label in notify_kinds.items() %}
+    <label style="display:flex;gap:8px;align-items:center;margin:6px 0;color:var(--fg)">
+      <input type="checkbox" name="n_{{ k }}" style="width:auto" {{ 'checked' if notify_on[k] }}> {{ label }}</label>
+    {% endfor %}
+    <div class="row" style="margin-top:8px;gap:6px">
+      <button class="btn">알림 종류 저장</button>
+      <button class="btn" formaction="{{ url_for('notify_test') }}">🔔 테스트 보내기</button>
+    </div>
+  </form>
+  <details style="margin-top:12px"><summary><b>텔레그램 연결 방법</b></summary>
+    <ol class="mute" style="padding-left:18px;line-height:1.8">
+      <li>텔레그램에서 <b>@BotFather</b> → <code>/newbot</code> → 이름 정하기 → 받은 <b>토큰</b>을 아래 ‘연결 정보 → 알림’에 넣기</li>
+      <li>만든 봇을 열어 <b>아무 메시지</b>나 보내기 (예: 안녕)</li>
+      <li>아래 <b>채팅 ID 찾기</b> → 자동 저장 → ‘테스트 보내기’</li>
+    </ol>
+    <form method="post" action="{{ url_for('telegram_find') }}"><button class="btn" {{ '' if tg_token else 'disabled' }}>🔎 채팅 ID 찾기</button></form>
+  </details>
+  <details style="margin-top:10px" {{ 'open' if kakao_key and not kakao }}><summary><b>카카오톡 연결 방법</b> <span class="mute">(내 카톡 ‘나와의 채팅’으로 받기)</span></summary>
+    <ol class="mute" style="padding-left:18px;line-height:1.8">
+      <li><a href="https://developers.kakao.com" target="_blank" rel="noopener">developers.kakao.com</a> → 내 애플리케이션 → 앱 만들기</li>
+      <li>앱 설정 → 플랫폼 → Web 사이트 도메인에 <code>{{ kakao_redirect.rsplit('/kakao/', 1)[0] }}</code></li>
+      <li>카카오 로그인 → <b>활성화 ON</b>, Redirect URI에 <code>{{ kakao_redirect }}</code></li>
+      <li>카카오 로그인 → 동의항목 → <b>카카오톡 메시지 전송</b> 사용</li>
+      <li>앱 키의 <b>REST API 키</b>를 아래 ‘연결 정보 → 알림’에 넣기</li>
+      <li>아래 <b>카카오톡 연결</b> → 카카오 로그인·동의 → 완료 (2개월마다 다시 연결 필요할 수 있음)</li>
+    </ol>
+    <div class="row" style="gap:6px">
+      <a class="btn {{ 'pri' if kakao_key and not kakao }}" href="{{ url_for('kakao_connect') }}">💬 카카오톡 {{ '다시 ' if kakao }}연결</a>
+      {% if kakao %}<form method="post" action="{{ url_for('kakao_disconnect') }}" class="inline"><button class="btn danger">연결 끊기</button></form>{% endif %}
+    </div>
+  </details>
+  <div class="mute" style="margin-top:8px">알림이 실패해도 매매에는 영향이 없어요. 카카오톡은 메시지가 길면 앞부분만 보내요.</div>
+</div>
+
 <div class="card" id="security">
   <h2>보안 — 패스키 로그인</h2>
   <div class="mute"><b>패스키</b>로 비밀번호 없이 로그인해요. 기기에서 Face ID·Touch ID·화면 잠금으로 확인합니다. 기기마다 한 번 등록하면 돼요.</div>

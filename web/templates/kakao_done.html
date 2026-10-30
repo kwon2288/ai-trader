@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card" style="max-width:420px;margin:40px auto">
+  {% if err %}
+  <h2>❌ 카카오톡 연결 실패</h2>
+  <p class="mute">{{ err }}</p>
+  {% else %}
+  <h2>✅ 카카오톡 알림 연결 완료</h2>
+  <p class="mute">카카오톡 ‘나와의 채팅’으로 테스트 메시지를 보냈어요.</p>
+  {% endif %}
+  <a class="btn pri" href="{{ url_for('settings') }}#notify">설정으로 돌아가기</a>
+</div>
+{% endblock %}

@@ -14,10 +14,11 @@
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;-webkit-text-size-adjust:100%}
 header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
 .bar{max-width:880px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px}
-.bar b{font-size:16px}
+.bar b{font-size:16px;white-space:nowrap}
 nav{display:flex;gap:4px;margin-left:auto}
-nav a,nav button{color:var(--mute);text-decoration:none;padding:6px 8px;border-radius:8px;font:inherit;background:none;border:0;cursor:pointer}
+nav a,nav button{white-space:nowrap;color:var(--mute);text-decoration:none;padding:6px 8px;border-radius:8px;font:inherit;background:none;border:0;cursor:pointer}
 nav a.on{color:var(--fg);background:var(--bg);font-weight:600}
+@media (max-width:520px){.brand-t{display:none}.bar{gap:6px;padding:10px 12px}nav{gap:0}nav a,nav button{padding:6px 7px;font-size:15px}}
 main{max-width:880px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 .card h2{font-size:15px;margin:0 0 10px;color:var(--mute);font-weight:600}
@@ -27,6 +28,13 @@ main{max-width:880px;margin:0 auto;padding:16px}
 .b-warn{color:var(--warn);background:var(--warnbg);border-color:transparent}
 pre.notes,pre.log{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);
   border-radius:8px;padding:10px;font-size:12.5px;max-height:320px;overflow:auto;margin:8px 0}
+main a:not(.btn):not(.badge){color:var(--acc)}
+a.btn{text-decoration:none;display:inline-block}
+.chart .bar-up{fill:var(--up)}.chart .bar-down{fill:var(--down)}
+.chart .lbl{font-size:11px;fill:var(--mute);text-anchor:middle}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.pills a{padding:5px 11px;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--fg);text-decoration:none}
+.pills a.on{background:var(--acc);border-color:var(--acc);color:#fff}
 details.acct>summary{cursor:pointer;list-style:none}
 details.acct>summary::-webkit-details-marker{display:none}
 details.acct>summary::before{content:"▸ ";color:var(--mute)}
@@ -64,10 +72,11 @@ details summary{cursor:pointer;color:var(--mute)}
 </style>
 </head>
 <body>
-<header><div class="bar"><b>📈 AI 자동매매</b>
+<header><div class="bar"><b>📈 <span class="brand-t">AI 자동매매</span></b>
 {% if session.ok %}
 <nav>
   <a href="{{ url_for('index') }}" class="{{ 'on' if request.endpoint=='index' }}">현황</a>
+  <a href="{{ url_for('pnl') }}" class="{{ 'on' if request.endpoint=='pnl' }}">손익</a>
   <a href="{{ url_for('history') }}" class="{{ 'on' if request.endpoint=='history' }}">기록</a>
   <a href="{{ url_for('settings') }}" class="{{ 'on' if request.endpoint=='settings' }}">설정</a>
   <form class="inline" method="post" action="{{ url_for('logout') }}"><button title="로그아웃">로그아웃</button></form>

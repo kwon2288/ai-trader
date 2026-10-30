@@ -92,7 +92,8 @@ def test_buy_respects_position_cap_and_budget():
     assert ("BUY", "000001", 2) in br.orders
     assert ("BUY", "000002", 1) in br.orders
     assert not any(o[1] == "000003" for o in br.orders)
-    assert bot.bot_cash == 100_000 - 40_000 - 30_000, out
+    assert bot.avail == 100_000 - 40_000 - 30_000, out
+    assert bot.j.bot_lots()["000001"] == (2, 20_000)
 
 
 def test_low_confidence_and_dry_mode():
@@ -104,7 +105,7 @@ def test_low_confidence_and_dry_mode():
         {"code": "000001", "action": "BUY", "amount_krw": 40_000, "confidence": 0.9, "reason": "r"}])
     out = bot.run()
     assert ("BUY", "000001", 2) in br.orders  # FakeBroker는 그대로 받지만 장부는 안 바뀜
-    assert bot.bot_cash == 100_000 and bot.j.bot_codes() == {}, out
+    assert bot.j.bot_codes() == {}, out
 
 
 def test_stop_loss_runs_before_ai_and_only_bot_positions():
@@ -130,8 +131,9 @@ def test_min_hold_days_blocks_ai_sell():
 def test_drawdown_halts_and_kill_switch():
     cfg, br, _, bot = setup(decisions=[
         {"code": "000001", "action": "BUY", "amount_krw": 40_000, "confidence": 0.9, "reason": "r"}])
-    bot.j.set("bot_cash_mock", "70000")  # 원금 대비 -30%
-    bot.j.set("bot_budget_mock", "100000")
+    from trader.broker import OrderResult as R
+    bot.j.add_order("mock", "BUY", "000009", "x", 1, 100_000, R(True, "1", "ok"), "AI")   # 10만원에 사서
+    bot.j.add_order("mock", "SELL", "000009", "x", 1, 70_000, R(True, "2", "ok"), "AI")   # 7만원에 팜 → -30%
     out = bot.run()
     assert br.orders == [] and "최대 손실" in out
     assert bot.j.get("halted_mock") == "1"
@@ -214,16 +216,32 @@ def test_old_position_without_qty_uses_order_history():
     assert not any(o[2] > 1 for o in br.orders if o[1] == "000001")
 
 
-def test_budget_change_adjusts_cash():
+def test_fixed_budget_limited_by_account_cash():
+    # 예산 10만원, 봇 투자 중 2만원 → 남은 예산 8만원. 계좌 현금 3만원이면 3만원까지만
     from trader.broker import OrderResult as R
-    cfg, br, _, bot = setup(total_krw=100_000)
-    bot.j.set("bot_cash_mock", "80000")                               # 예전 장부: 2만원 쓴 상태, 예산 기록 없음
-    bot.j.add_order("mock", "BUY", "000009", "x", 1, 20_000, R(True, "9", "ok"), "AI")
-    bot.cfg.total_krw = 70_000                                        # 웹에서 원금 7만원으로 낮춤
-    bot._sync_budget()
-    assert bot.bot_cash == 50_000
-    bot._sync_budget()                                                # 두 번 반영되지 않음
-    assert bot.bot_cash == 50_000
+    _, br, _, bot = setup(decisions=[
+        {"code": "000002", "action": "BUY", "amount_krw": 50_000, "confidence": 0.9, "reason": "r"}],
+        holdings={"000001": Holding("000001", "종목1", 1, 20_000, 20_000)})
+    bot.j.open_position("000001", "종목1", "kr", 1, 20_000)
+    bot.broker.balance = lambda: Balance(30_000, dict(bot.broker.holdings))
+    out = bot.run()
+    assert ("BUY", "000002", 1) in br.orders, out          # 30,000원 → 1주(30,000)
+    assert "30,000원까지만" in out
+
+
+def test_profit_not_reinvested_and_pnl_sums():
+    # 예산 고정: 3만원 벌어도 한도는 예산 그대로, 손익은 실현+평가 합산
+    from trader import ledger
+    from trader.broker import OrderResult as R
+    cfg, br, _, bot = setup(holdings={"000001": Holding("000001", "종목1", 1, 20_000, 18_000)})
+    j = bot.j
+    j.add_order("mock", "BUY", "000009", "x", 1, 50_000, R(True, "1", "ok"), "AI")
+    j.add_order("mock", "SELL", "000009", "x", 1, 80_000, R(True, "2", "ok"), "AI")
+    j.open_position("000001", "종목1", "kr", 1, 20_000)
+    held = {"000001": Holding("000001", "종목1", 1, 20_000, 18_000)}
+    st = ledger.status(j, cfg, held, 10_000_000)
+    assert (st["realized"], st["unrealized"], st["pnl"]) == (30_000, -2_000, 28_000)
+    assert st["pnl_pct"] == 28.0 and st["room"] == 80_000 and st["avail"] == 80_000
 
 
 if __name__ == "__main__":

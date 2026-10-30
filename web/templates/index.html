@@ -25,23 +25,40 @@
 </div>
 
 <div class="card">
-  <h2>봇 자산 <span class="mute" style="font-weight:normal;font-size:13px">— 봇 예산 장부 기준</span></h2>
-  {% if snap %}
-  {% set acash = snap.account.cash if snap.account else snap.get('account_cash') %}
+  <h2>봇 운용 현황</h2>
+  {% if snap and snap.budget is defined %}
+  {% set cur = c.currency %}
   <div class="stats">
-    <div class="stat"><div class="k">봇 총 자산</div><div class="v">{{ money(snap.equity, c.currency) }}</div></div>
-    <div class="stat"><div class="k">원금 대비</div><div class="v">{{ pct(snap.pnl_pct) }}</div></div>
-    <div class="stat"><div class="k">봇 현금 (예산)</div><div class="v">{{ money(snap.cash, c.currency) }}</div>
-      {% if acash is not none %}<div class="mute">계좌 주문가능 {{ money(acash, c.currency) }}</div>{% endif %}</div>
-    <div class="stat"><div class="k">오늘 주문</div><div class="v">{{ orders_today }} / {{ c.max_orders_per_day }}</div></div>
+    <div class="stat"><div class="k">설정 예산</div><div class="v">{{ money(snap.budget, cur) }}</div></div>
+    <div class="stat"><div class="k">봇 손익</div><div class="v">{{ pct(snap.pnl_pct) }}</div>
+      <div class="mute">{{ ('+' if snap.pnl >= 0 else '') ~ num(snap.pnl, cur) }} (평가 {{ ('+' if snap.unrealized >= 0 else '') ~ num(snap.unrealized, cur) }} · 실현 {{ ('+' if snap.realized >= 0 else '') ~ num(snap.realized, cur) }})</div></div>
+    <div class="stat"><div class="k">봇 투자 중</div><div class="v">{{ money(snap.invested, cur) }}</div>
+      <div class="mute">{{ snap.positions|length }}종목 매입금액</div></div>
+    <div class="stat"><div class="k">지금 살 수 있는 금액</div><div class="v">{{ money(snap.avail, cur) }}</div>
+      <div class="mute">오늘 주문 {{ orders_today }} / {{ c.max_orders_per_day }}</div></div>
   </div>
-  {% if acash is not none and acash < snap.cash %}
-  <div class="flash err" style="margin:10px 0">⚠ 계좌의 주문가능 현금({{ money(acash, c.currency) }})이 봇 예산 현금({{ money(snap.cash, c.currency) }})보다 적어요.
-    봇은 실제로 <b>{{ money(acash, c.currency) }}까지만</b> 매수합니다. 계좌에 입금하거나, 설정에서 원금을 줄이세요.</div>
+  {% set b = snap.budget if snap.budget > 0 else 1 %}
+  {% set short = [snap.room - snap.avail, 0]|max %}
+  <div style="margin:12px 0 4px;font-size:13px">예산 사용</div>
+  <div style="height:10px;border-radius:6px;background:var(--line);overflow:hidden;display:flex">
+    <div style="width:{{ [snap.invested / b * 100, 100]|min }}%;background:var(--acc)"></div>
+    <div style="width:{{ [snap.avail / b * 100, 100]|min }}%;background:var(--ok)"></div>
+  </div>
+  <div class="mute" style="margin-top:6px;line-height:1.7">
+    <span style="color:var(--acc)">■</span> 투자 중 {{ money(snap.invested, cur) }} ·
+    <span style="color:var(--ok)">■</span> 살 수 있음 {{ money(snap.avail, cur) }}
+    {% if short > 0 %}· <span>■</span> 계좌 현금 부족으로 못 씀 {{ money(short, cur) }}{% endif %}</div>
+  {% if short > 0 and snap.account_cash is not none %}
+  <div class="flash" style="margin:10px 0;background:var(--warnbg);color:var(--warn)">
+    계좌 주문가능 현금이 <b>{{ money(snap.account_cash, cur) }}</b>이라 남은 예산 {{ money(snap.room, cur) }} 중
+    {{ money(snap.avail, cur) }}까지만 사요.</div>
   {% endif %}
   {{ chart|safe }}
-  <div class="mute">원금 {{ money(c.total_krw, c.currency) }} · 기준 {{ snap.ts[5:16].replace('T',' ') }}
-    <br>봇 자산은 계좌 잔고가 아니라 <b>봇에게 맡긴 예산</b>(원금 ± 봇 매매 손익)이에요. 계좌 전체는 아래 ‘내 계좌 전체’에서 보세요.</div>
+  <div class="mute">지금 살 수 있는 금액 = min(남은 예산, 계좌 주문가능 현금) · 남은 예산 = 설정 예산 − 봇 투자 중<br>
+    수익은 재투자하지 않고 계좌에 남아요. 손익은 수수료·세금 전 추정치 · 기준 {{ snap.ts[5:16].replace('T',' ') }}
+    · <a href="{{ url_for('pnl') }}">기간별 손익 →</a></div>
+  {% elif snap %}
+  <div class="mute">새 계산 방식으로 바뀌었어요. 아래 ‘↻ 잔고 새로고침’을 누르면 다시 계산해서 보여 줘요.</div>
   {% else %}
   <div class="mute">아직 실행 기록이 없습니다. 아래 ‘AI 분석’이나 ‘잔고 새로고침’을 눌러 보세요.</div>
   {% endif %}

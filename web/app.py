@@ -230,6 +230,80 @@ def history():
                            orders=j.orders(c.ledger, 200), logs=j.logs(50))
 
 
+PERIODS = [("today", "오늘"), ("week", "이번 주"), ("month", "이번 달"), ("3m", "최근 3개월"),
+           ("year", "올해"), ("all", "전체"), ("custom", "기간 지정")]
+
+
+def _period_range(p: str, f: str | None, t: str | None):
+    from datetime import date
+    today = datetime.now(KST).date()
+    if p == "today":
+        return today, today
+    if p == "week":
+        return today - timedelta(days=today.weekday()), today
+    if p == "month":
+        return today.replace(day=1), today
+    if p == "3m":
+        return today - timedelta(days=90), today
+    if p == "year":
+        return today.replace(month=1, day=1), today
+    if p == "custom":
+        try:
+            return (date.fromisoformat(f) if f else None), (date.fromisoformat(t) if t else None)
+        except ValueError:
+            return None, None
+    return None, None
+
+
+def bars_svg(items: list[tuple[str, float]]) -> str:
+    """기간 손익 막대 (외부 라이브러리 없이). items: [(라벨, 금액)]"""
+    if not items:
+        return ""
+    w, h, pad = 600, 170, 18
+    hi = max(max(v for _, v in items), 0)
+    lo = min(min(v for _, v in items), 0)
+    span = (hi - lo) or 1
+    zero = pad + (hi / span) * (h - 2 * pad)
+    bw = (w - 2 * pad) / len(items)
+    out = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-label="기간별 실현 손익">',
+           f'<line x1="0" x2="{w}" y1="{zero:.1f}" y2="{zero:.1f}" class="base"/>']
+    for i, (lab, v) in enumerate(items):
+        bh = abs(v) / span * (h - 2 * pad)
+        y = zero - bh if v >= 0 else zero
+        x = pad + i * bw + bw * 0.15
+        out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw * 0.7:.1f}" height="{max(bh, 1):.1f}" '
+                   f'class="{"bar-up" if v >= 0 else "bar-down"}"><title>{lab}: {v:,.2f}</title></rect>')
+    step = max(1, len(items) // 6)
+    for i in range(0, len(items), step):
+        out.append(f'<text x="{pad + i * bw + bw / 2:.1f}" y="{h - 3}" class="lbl">{items[i][0][5:]}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+@app.get("/pnl")
+@login_required
+def pnl():
+    from trader import ledger
+    m = current_market()
+    base = cfg()
+    c = base.for_market(m)
+    j = Journal(c.db_path)
+    p = request.args.get("p", "month")
+    f, t = request.args.get("from"), request.args.get("to")
+    start, end = _period_range(p, f, t)
+    r = ledger.period(j, c.ledger, start, end)
+    days = r["by_day"]
+    monthly = len(days) > 45
+    if monthly:
+        agg: dict[str, float] = {}
+        for d, v in days:
+            agg[d[:7] + "-01"] = agg.get(d[:7] + "-01", 0) + v
+        days = sorted(agg.items())
+    return render_template("pnl.html", c=c, base=base, market=m, r=r, periods=PERIODS, p=p,
+                           start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
+                           snap=j.snapshot(c.ledger))
+
+
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings():
@@ -255,6 +329,14 @@ def settings():
                            env_groups=_env_view(), web_env=_web_env_edit(),
                            upd=__import__("trader.updater", fromlist=["x"]).last_check(cfg().data_dir),
                            web_update=_web_update(),
+                           notify_kinds=__import__("trader.notify", fromlist=["x"]).KINDS,
+                           notify_on={k: __import__("trader.notify", fromlist=["x"]).enabled(cfg(), k)
+                                      for k in __import__("trader.notify", fromlist=["x"]).KINDS},
+                           tg_ready=__import__("trader.notify", fromlist=["x"]).telegram_ready(),
+                           tg_token=bool(os.environ.get("TELEGRAM_BOT_TOKEN")),
+                           kakao_key=bool(os.environ.get("KAKAO_REST_KEY")),
+                           kakao=__import__("trader.notify", fromlist=["x"]).kakao_info(cfg().data_dir),
+                           kakao_redirect=_public_base() + url_for("kakao_callback"),
                            passkey_list=__import__("web.passkeys", fromlist=["x"]).load(cfg().data_dir),
                            acct_choice=session.get("acct_choice"),
                            mode_label=MODE_LABEL, live_phrase=LIVE_PHRASE, web_live=_web_live_switch(),
@@ -400,6 +482,12 @@ ENV_GROUPS = [
         ("ANTHROPIC_API_KEY", "Claude (console.anthropic.com)", "secret"),
         ("OPENAI_API_KEY", "ChatGPT (platform.openai.com)", "secret"),
     ]),
+    ("알림 — 텔레그램 · 카카오톡 (선택)", "notify", [
+        ("TELEGRAM_BOT_TOKEN", "텔레그램 봇 토큰 (@BotFather)", "secret"),
+        ("TELEGRAM_CHAT_ID", "텔레그램 채팅 ID — 알림 칸의 ‘찾기’로 자동 입력", "plain"),
+        ("KAKAO_REST_KEY", "카카오 REST API 키 (developers.kakao.com)", "id"),
+        ("KAKAO_CLIENT_SECRET", "카카오 Client Secret — 켠 경우만", "secret"),
+    ]),
     ("한국투자증권 (선택)", "kis", [
         ("KIS_APP_KEY", "모의투자 앱키", "id"),
         ("KIS_APP_SECRET", "모의투자 앱 시크릿", "secret"),
@@ -513,6 +601,104 @@ def change_env():
     Journal(c.db_path).add_log(c.ledger, "env", "web", f"연결 정보 변경: {names}")
     _restart_soon()
     return render_template("restarting.html", names=names)
+
+
+# ── 알림 (텔레그램 · 카카오톡) ─────────────────────────────
+def _public_base() -> str:
+    host = os.environ.get("WEB_PUBLIC_HOST") or request.host
+    h = host.split(":")[0]
+    local = h in ("localhost", "127.0.0.1") or h.replace(".", "").isdigit()
+    proto = request.headers.get("X-Forwarded-Proto") or ("http" if local else "https")
+    return f"{proto}://{host}"
+
+
+@app.post("/notify/save")
+@login_required
+def notify_save():
+    from trader import notify
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    for k in notify.KINDS:
+        text = settings_io._set(text, "notify", k, bool(request.form.get(f"n_{k}")))
+    CONFIG_PATH.write_text(text, encoding="utf-8")
+    flash("알림 설정을 저장했습니다.", "ok")
+    return redirect(url_for("settings") + "#notify")
+
+
+@app.post("/notify/test")
+@login_required
+def notify_test():
+    from trader import notify
+    c = cfg()
+    chs = notify.channels(c.data_dir)
+    if not chs:
+        flash("연결된 알림이 없습니다. 텔레그램 키를 넣거나 카카오톡을 연결하세요.", "err")
+    else:
+        errs = notify.send(c, "test", f"🔔 AI 자동매매 테스트 알림 ({datetime.now(KST):%m/%d %H:%M})", force=True)
+        ok = [ch for ch in chs if not any(e.startswith(ch) for e in errs)]
+        names = {"telegram": "텔레그램", "kakao": "카카오톡"}
+        if ok:
+            flash("보냈습니다: " + ", ".join(names[x] for x in ok), "ok")
+        for e in errs:
+            flash("실패 — " + e, "err")
+    return redirect(url_for("settings") + "#notify")
+
+
+@app.post("/notify/telegram/find")
+@login_required
+def telegram_find():
+    from trader import envfile, notify
+    try:
+        chats = notify.telegram_find_chat()
+    except Exception as e:  # noqa: BLE001
+        flash(f"텔레그램 조회 실패: {e}", "err")
+        return redirect(url_for("settings") + "#notify")
+    if not chats:
+        flash("대화를 찾지 못했어요. 텔레그램에서 봇에게 아무 메시지나 보낸 뒤 다시 누르세요.", "err")
+    elif len(chats) == 1:
+        envfile.update({"TELEGRAM_CHAT_ID": chats[0]["id"]})
+        os.environ["TELEGRAM_CHAT_ID"] = chats[0]["id"]
+        flash(f"채팅 ID 저장: {chats[0]['name'] or chats[0]['id']} — ‘테스트 보내기’로 확인하세요.", "ok")
+    else:
+        flash("대화가 여러 개예요. 연결 정보 → 알림의 채팅 ID에 직접 넣으세요: "
+              + ", ".join(f"{c_['name']}={c_['id']}" for c_ in chats), "err")
+    return redirect(url_for("settings") + "#notify")
+
+
+@app.get("/kakao/connect")
+@login_required
+def kakao_connect():
+    from trader import notify
+    if not os.environ.get("KAKAO_REST_KEY"):
+        flash("먼저 연결 정보 → 알림에 카카오 REST API 키를 넣으세요.", "err")
+        return redirect(url_for("settings") + "#notify")
+    return redirect(notify.kakao_auth_url(cfg().data_dir, _public_base() + url_for("kakao_callback")))
+
+
+@app.get("/kakao/callback")
+def kakao_callback():
+    """카카오에서 돌아오는 주소 — 쿠키(SameSite=Strict)가 안 오므로 로그인 대신 일회용 state 로 확인."""
+    from trader import notify
+    err = request.args.get("error_description") or request.args.get("error")
+    if not err:
+        try:
+            notify.kakao_callback(cfg().data_dir, request.args.get("code", ""), request.args.get("state", ""))
+        except Exception as e:  # noqa: BLE001
+            err = str(e)
+    if not err:
+        try:
+            notify.kakao_send(cfg().data_dir, "🔔 AI 자동매매 카카오톡 알림이 연결됐어요.")
+        except Exception as e:  # noqa: BLE001
+            err = f"연결은 됐지만 테스트 메시지 실패: {e}"
+    return render_template("kakao_done.html", err=err)
+
+
+@app.post("/kakao/disconnect")
+@login_required
+def kakao_disconnect():
+    from trader import notify
+    notify.kakao_disconnect(cfg().data_dir)
+    flash("카카오톡 알림 연결을 끊었습니다.", "ok")
+    return redirect(url_for("settings") + "#notify")
 
 
 # ── 패스키 로그인 ─────────────────────────────────────

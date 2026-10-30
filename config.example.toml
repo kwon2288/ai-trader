@@ -97,3 +97,10 @@ symbols = [
   "PLTR",   # 팔란티어
   "SOFI",   # 소파이
 ]
+
+[notify]
+# 알림 (텔레그램·카카오톡 연결은 웹 설정 → 알림). 켜고 끌 종류:
+orders = true      # 주문 실행·실패
+errors = true      # 실행 오류 (AI·증권사 연결 등)
+halt = true        # 최대 손실 한도로 정지
+daily = false      # 하루 마감 요약 (그날 마지막 실행 후)

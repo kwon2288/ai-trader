@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import money, num, pct, market_tabs %}
+{% block title %}손익 · AI 자동매매{% endblock %}
+{% block body %}
+{{ market_tabs(base, market, 'pnl') }}
+{% set cur = c.currency %}
+<div class="card">
+  <h2>기간별 손익</h2>
+  <div class="pills">
+    {% for k, v in periods %}<a href="{{ url_for('pnl', p=k) }}" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
+  </div>
+  {% if p == 'custom' %}
+  <form method="get" class="row" style="gap:8px;margin-bottom:8px">
+    <input type="hidden" name="p" value="custom">
+    <input type="date" name="from" value="{{ f }}" style="width:auto">
+    <span class="mute">~</span>
+    <input type="date" name="to" value="{{ t }}" style="width:auto">
+    <button class="btn">조회</button>
+  </form>
+  {% endif %}
+  <div class="mute">{{ start.isoformat() if start else '처음' }} ~ {{ end.isoformat() if end else '오늘' }}</div>
+  <div class="stats" style="margin-top:8px">
+    <div class="stat"><div class="k">실현 손익</div><div class="v"><span class="{{ 'up' if r.pnl > 0 else ('down' if r.pnl < 0 else '') }}">{{ ('+' if r.pnl > 0 else '') ~ money(r.pnl, cur) }}</span></div>
+      {% if snap and snap.budget %}<div class="mute">예산 대비 {{ "%+.2f"|format(r.pnl / snap.budget * 100) }}%</div>{% endif %}</div>
+    <div class="stat"><div class="k">매도 / 매수</div><div class="v">{{ r.n }} / {{ r.buys }}건</div>
+      <div class="mute">매수 금액 {{ money(r.buy_amount, cur) }}</div></div>
+    <div class="stat"><div class="k">승률</div><div class="v">{% if r.win_rate is not none %}{{ r.win_rate }}%{% else %}-{% endif %}</div>
+      <div class="mute">수익 {{ r.wins }} · 손실 {{ r.n - r.wins }}</div></div>
+    <div class="stat"><div class="k">최고 / 최저</div>
+      <div class="v" style="font-size:15px">{% if r.best %}{{ pct(r.best.pnl_pct) }} / {{ pct(r.worst.pnl_pct) }}{% else %}-{% endif %}</div>
+      {% if r.best %}<div class="mute">{{ r.best.name }} / {{ r.worst.name }}</div>{% endif %}</div>
+  </div>
+  {% if chart %}{{ chart|safe }}<div class="mute">{{ '월별' if monthly else '일별' }} 실현 손익</div>{% endif %}
+  {% if snap and snap.budget is defined %}
+  <div class="mute" style="margin-top:8px">지금 보유 중인 봇 종목의 평가 손익 {{ ('+' if snap.unrealized >= 0 else '') ~ money(snap.unrealized, cur) }}는
+    팔 때 실현 손익에 들어가요. 누적 봇 손익 {{ ('+' if snap.pnl >= 0 else '') ~ money(snap.pnl, cur) }} ({{ "%+.2f"|format(snap.pnl_pct) }}%)</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>종목별</h2>
+  {% if r.by_code %}
+  <div class="scroll"><table>
+    <tr><th>종목</th><th class="r">매도</th><th class="r">실현 손익</th></tr>
+    {% for b in r.by_code %}
+    <tr><td>{{ b.name }}<div class="mute">{{ b.code }}</div></td><td class="r">{{ b.n }}회</td>
+      <td class="r"><span class="{{ 'up' if b.pnl > 0 else ('down' if b.pnl < 0 else '') }}">{{ ('+' if b.pnl > 0 else '') ~ num(b.pnl, cur) }}</span></td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="mute">이 기간에 봇이 판 종목이 없어요.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>매도 내역</h2>
+  {% if r.trades %}
+  <div class="scroll"><table>
+    <tr><th>날짜</th><th>종목</th><th class="r">수량</th><th class="r">평단 → 매도</th><th class="r">손익</th></tr>
+    {% for tr in r.trades %}
+    <tr><td class="nw">{{ tr.ts[5:10] }}<div class="mute">{{ tr.ts[11:16] }}</div></td>
+      <td>{{ tr.name }}<div class="mute">{{ tr.code }}</div></td><td class="r">{{ tr.qty }}</td>
+      <td class="r nw">{{ num(tr.avg, cur) }}<div class="mute">→ {{ num(tr.price, cur) }}</div></td>
+      <td class="r nw">{{ pct(tr.pnl_pct) }}<div class="mute">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div></td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="mute">없음</div>{% endif %}
+  <div class="mute" style="margin-top:6px">주문 기록의 예상 가격 기준이며 수수료·세금은 빠져 있어요. 정확한 체결가는 증권사 앱에서 확인하세요.</div>
+</div>
+{% endblock %}
