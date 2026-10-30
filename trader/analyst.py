@@ -148,22 +148,44 @@ class ClaudeAnalyst:
         self.model, self.max_tokens = model, max_tokens
         self.label = f"Claude({model})"
 
-    def decide(self, ctx: dict) -> dict:
-        msg = self.client.messages.create(
-            model=self.model, max_tokens=self.max_tokens, system=SYSTEM,
-            tools=[{"name": "submit_decisions", "description": "포트폴리오 매매 판단을 제출한다.",
-                    "input_schema": SCHEMA}],
-            tool_choice={"type": "tool", "name": "submit_decisions"},
+    # 일부 모델은 도구 강제 호출(tool_choice=tool/any)을 지원하지 않는다 → 그때는 auto + 지시문으로 다시 요청
+    _no_forced: set = set()
+
+    def _create(self, ctx: dict, forced: bool):
+        tool = {"name": "submit_decisions", "description": "포트폴리오 매매 판단을 제출한다.", "input_schema": SCHEMA}
+        system = SYSTEM if forced else (SYSTEM + "\n\n반드시 submit_decisions 도구를 한 번 호출해 판단을 제출하세요. "
+                                                 "도구를 쓸 수 없으면 같은 형식의 JSON만 출력하세요.")
+        return self.client.messages.create(
+            model=self.model, max_tokens=self.max_tokens, system=system, tools=[tool],
+            tool_choice={"type": "tool", "name": "submit_decisions"} if forced else {"type": "auto"},
             messages=[{"role": "user", "content": build_prompt(ctx)}],
         )
+
+    def decide(self, ctx: dict) -> dict:
+        forced = self.model not in self._no_forced
+        try:
+            msg = self._create(ctx, forced)
+        except Exception as e:  # noqa: BLE001
+            if forced and "tool_choice" in str(e):
+                ClaudeAnalyst._no_forced.add(self.model)
+                msg = self._create(ctx, False)
+            else:
+                raise
+        raw = None
         for block in msg.content:
             if getattr(block, "type", "") == "tool_use":
                 raw = dict(block.input)
-                u = getattr(msg, "usage", None)
-                if u:
-                    raw["_usage"] = {"in": u.input_tokens, "out": u.output_tokens}
-                return normalize(raw, self.label)
-        raise RuntimeError("Claude 응답에 판단(tool_use)이 없습니다")
+                break
+        if raw is None:                                   # 도구 대신 글로 JSON 을 준 경우
+            text = "".join(getattr(b, "text", "") for b in msg.content)
+            try:
+                raw = _extract_json(text)
+            except Exception:  # noqa: BLE001
+                raise RuntimeError("Claude 응답에 판단이 없습니다") from None
+        u = getattr(msg, "usage", None)
+        if u:
+            raw["_usage"] = {"in": u.input_tokens, "out": u.output_tokens}
+        return normalize(raw, self.label)
 
 
 class GeminiAnalyst:

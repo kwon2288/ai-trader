@@ -171,6 +171,29 @@ def test_make_analyst_requires_key():
         raise AssertionError
 
 
+def test_claude_falls_back_when_forced_tool_unsupported():
+    import types
+    from trader import analyst as A
+    calls = []
+
+    class Msgs:
+        def create(self, **kw):
+            calls.append(kw["tool_choice"]["type"])
+            if kw["tool_choice"]["type"] == "tool":
+                raise RuntimeError("Error code: 400 - tool_choice: type \"tool\" and \"any\" are not supported for this model.")
+            text = '판단입니다 ```json\n{"market_view": "보합", "decisions": [{"code": "5930", "action": "HOLD", "confidence": 0.7, "reason": "r"}]}\n```'
+            return types.SimpleNamespace(content=[types.SimpleNamespace(type="text", text=text)],
+                                         usage=types.SimpleNamespace(input_tokens=10, output_tokens=5))
+
+    a = A.ClaudeAnalyst.__new__(A.ClaudeAnalyst)
+    a.client = types.SimpleNamespace(messages=Msgs())
+    a.model, a.max_tokens, a.label = "claude-test-x", 100, "Claude(test)"
+    r = a.decide({"candidates": [], "portfolio": {}, "rules": {}})
+    assert calls == ["tool", "auto"] and r["decisions"][0]["code"] == "005930"
+    a.decide({"candidates": [], "portfolio": {}, "rules": {}})
+    assert calls == ["tool", "auto", "auto"]                 # 다음부터는 바로 auto
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
