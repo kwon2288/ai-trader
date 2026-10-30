@@ -4,9 +4,8 @@
 {% block body %}
 {% macro usd(v) %}{% if v is none %}-{% elif v < 0.01 and v > 0 %}${{ "%.4f"|format(v) }}{% else %}${{ "%.2f"|format(v) }}{% endif %}{% endmacro %}
 {% macro krw(v) %}{% if v is not none %}<span class="mute">≈{{ "{:,.0f}".format(v * 1400) }}원</span>{% endif %}{% endmacro %}
-{{ sec_toolbar() }}
-<div class="card sec" id="summary" data-sum="{{ {'month':'이번 달','30d':'최근 30일','all':'전체'}.get(p, '') }} ${{ '%.2f'|format(summ.cost) }} · 호출 {{ summ.calls }}회">
-  <h2 class="sec-head">AI 사용량 · 비용</h2>
+<div class="card" id="summary">
+  <h2>AI 사용량 · 비용</h2>
   <div class="pills">
     {% for k, v in [('month','이번 달'),('30d','최근 30일'),('all','전체')] %}
     <a href="{{ url_for('usage', p=k) }}#summary" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
@@ -30,6 +29,7 @@
   {% else %}<div class="mute">아직 기록이 없어요. 이 버전부터 AI를 부를 때마다 쌓여요.</div>{% endif %}
 </div>
 
+{{ sec_toolbar() }}
 {% set cl = proj.get('claude') %}
 <div class="card sec" id="forecast" data-sum="{% for prov, x in proj.items() %}{% if x.calls or x.has_key %}{{ x.label }} {% if x.free %}무료{% elif x.months is none %}-{% elif x.months >= 24 %}{{ '%.0f'|format(x.months / 12) }}년+{% else %}{{ '%.1f'|format(x.months) }}개월{% endif %}{% if x.remaining is not none %}(잔액 ${{ '%.2f'|format(x.remaining) }}){% endif %}   {% endif %}{% endfor %}">
   <h2 class="sec-head">${{ "%g"|format(st.budget) }} 충전하면 얼마나 쓸까</h2>
