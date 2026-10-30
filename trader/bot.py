@@ -186,6 +186,9 @@ class Bot:
         dd = (equity / cfg.total_krw - 1) * 100
         self.say(f"💰 봇 자산 {cfg.money(equity)} (현금 {cfg.money(self.bot_cash)} + 주식 {cfg.money(holdings_value)})"
                  f" | 원금 대비 {dd:+.2f}%")
+        if cfg.mode != "dry" and bal.orderable_cash != float("inf") and bal.orderable_cash < self.bot_cash:
+            self.say(f"⚠ 계좌 주문가능 현금 {cfg.money(bal.orderable_cash)} < 봇 예산 현금 {cfg.money(self.bot_cash)}"
+                     f" → 실제로는 {cfg.money(bal.orderable_cash)}까지만 매수합니다")
         run_id = self.j.start_run(cfg.ledger, equity)
         self.j.save_snapshot(cfg.ledger, {
             "equity": equity, "cash": self.bot_cash, "pnl_pct": round(dd, 2),
