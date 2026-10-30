@@ -360,18 +360,33 @@ class ConsensusAnalyst:
     def decide(self, ctx: dict) -> dict:
         from concurrent.futures import ThreadPoolExecutor, wait
         self.errors = []
+        self.timings = []          # 실행 로그용: "Claude 12초", "Gemini 실패 150초" …
         results = []
+        took: dict[int, float] = {}
+
+        def timed(m):
+            t = time.monotonic()
+            try:
+                return m.decide(ctx)
+            finally:
+                took[id(m)] = time.monotonic() - t
+
+        t0 = time.monotonic()
         ex = ThreadPoolExecutor(max_workers=len(self.members))
-        futs = {ex.submit(m.decide, ctx): m for m in self.members}
+        futs = {ex.submit(timed, m): m for m in self.members}
         wait(futs, timeout=CONSENSUS_DEADLINE)
         for f, m in futs.items():
+            short = m.label.split("(")[0]
             if not f.done():
                 self.errors.append(f"{m.label}: {CONSENSUS_DEADLINE // 60}분 안에 응답 없음")
+                self.timings.append(f"{short} 응답 없음({round(time.monotonic() - t0)}초+)")
                 continue
             try:
                 results.append(f.result())
+                self.timings.append(f"{short} {round(took.get(id(m), 0))}초")
             except Exception as e:  # noqa: BLE001
                 self.errors.append(f"{m.label}: {e}")
+                self.timings.append(f"{short} 실패({round(took.get(id(m), 0))}초)")
         ex.shutdown(wait=False, cancel_futures=True)     # 늦은 AI 는 기다리지 않음
         if not results:
             raise RuntimeError("모든 AI 가 응답하지 않았습니다 → " + "; ".join(self.errors))

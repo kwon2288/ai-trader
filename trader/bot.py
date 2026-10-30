@@ -1,6 +1,8 @@
 """한 번 실행 = 한 번의 '분석 → 위험관리 → 주문' 사이클. 스케줄러가 하루 1~2회 호출한다."""
 from __future__ import annotations
 
+import time
+
 import logging
 import math
 from datetime import timedelta
@@ -410,9 +412,20 @@ class Bot:
             "recent_decisions": self.j.recent_decisions(mode=cfg.ledger),
         }
         self.say(f"🧠 {getattr(self.analyst, 'label', 'AI')} 에게 {len(candidates)}종목 판단 요청 중…")
+        t_ai = time.monotonic()
+
+        def say_time():
+            total = round(time.monotonic() - t_ai)
+            per = getattr(self.analyst, "timings", None)
+            if per:
+                self.say(f"⏱ AI 응답 시간: {' · '.join(per)} (전체 {total}초)")
+            elif not is_rules:
+                self.say(f"⏱ AI 응답 시간: {getattr(self.analyst, 'label', 'AI').split('(')[0]} {total}초")
         try:
             result = self.analyst.decide(ctx)
+            say_time()
         except Exception as e:  # noqa: BLE001
+            say_time()
             self.say(f"⚠ AI 분석 실패 — 이번 회차는 매매하지 않습니다: {e}")
             if not analyze_only:
                 self.notify("errors", f"⚠ {self._mk()} AI 분석 실패 — 이번 회차는 매매하지 않았습니다\n{e}")

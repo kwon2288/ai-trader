@@ -27,8 +27,9 @@ def test_status_lifecycle():
 def test_bot_reports_steps():
     cfg, br, _, bot = tb.setup(decisions=[])
     runstatus.start(cfg.data_dir, "매매 실행", "kr")
-    bot.run()
+    out = bot.run()
     assert runstatus.read(cfg.data_dir)["step"]
+    assert "⏱ AI 응답 시간" in out, out
 
 
 def test_consensus_deadline():
@@ -51,6 +52,9 @@ def test_consensus_deadline():
         t = time.time()
         out = analyst.ConsensusAnalyst([Fast("A"), Fast("B"), Slow()]).decide({})
         assert time.time() - t < 2.5 and "응답 없음" in out["market_view"]
+        c = analyst.ConsensusAnalyst([Fast("A"), Fast("B"), Slow()])
+        c.decide({})
+        assert c.timings[:2] == ["A 0초", "B 0초"] and c.timings[2].startswith("느림 응답 없음")
     finally:
         analyst.CONSENSUS_DEADLINE = old
 
