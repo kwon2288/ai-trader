@@ -494,7 +494,7 @@ def usage_settings():
                   + ("" if prov else " — 이름이 claude-/gemini-/gpt- 로 시작하지 않아 모델 선택 목록엔 안 나와요"), "ok")
     pricing.save(c.data_dir, st)
     flash("저장했습니다.", "ok")
-    return redirect(url_for("usage"))
+    return redirect(url_for("usage") + "#calc")
 
 
 @app.route("/settings", methods=["GET", "POST"])

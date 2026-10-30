@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import money, num, pct, run_card, order_table, log_item, market_tabs %}
+{% from "_macros.html" import money, num, pct, run_card, order_table, log_item, market_tabs, sec_toolbar %}
 {% block body %}
 {{ market_tabs(base, market, 'index') }}
 
@@ -64,8 +64,9 @@
   {% endif %}
 </div>
 
-<div class="card">
-  <h2>봇 보유 종목</h2>
+{{ sec_toolbar() }}
+<div class="card sec" id="positions" data-sum="{% if snap and snap.positions %}{% for p in snap.positions %}{{ p.name }} {{ '%+.1f'|format(p.pnl_pct) }}%{{ ' · ' if not loop.last }}{% endfor %}{% else %}보유 없음{% endif %}">
+  <h2 class="sec-head">봇 보유 종목</h2>
   {% if snap and snap.positions %}
   <div class="scroll"><table>
     <tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">수익률</th></tr>
@@ -79,11 +80,9 @@
   {% else %}<div class="mute">봇이 보유한 종목이 없습니다.</div>{% endif %}
 </div>
 
-<div class="card">
-  <details class="acct">
-  <summary><h2 style="display:inline">내 계좌 전체</h2>
-    <span class="mute" style="font-size:13px">눌러서 보기</span></summary>
-  <div style="margin-top:10px">
+<div class="card sec" id="account" data-sum="눌러서 보기">
+  <h2 class="sec-head">내 계좌 전체</h2>
+  <div>
   <div class="mute" style="margin-bottom:8px">참고용 조회 — 봇은 🤖 표시된 수량만 매매해요.</div>
   {% set a = snap.account if snap else None %}
   {% if a %}
@@ -112,11 +111,10 @@
   <div class="mute">아래 ‘↻ 잔고 새로고침’을 누르면 계좌의 모든 보유 종목을 보여 줘요.</div>
   {% endif %}
   </div>
-  </details>
 </div>
 
-<div class="card">
-  <h2>조작</h2>
+<div class="card sec" id="actions" data-sum="AI 분석 · 지금 매매 · 잔고 새로고침 · {{ '재개' if stopped or halted else '정지' }}">
+  <h2 class="sec-head">조작</h2>
   <div class="row">
     <form class="inline" method="post" action="{{ url_for('action', name='analyze') }}">
       <button class="btn" {{ 'disabled' if busy }}>🧠 AI 분석 (주문 없음)</button></form>
@@ -138,8 +136,8 @@
     실행에는 20초~1분 정도 걸려요.{% if broker == 'toss' and c.mode == 'live' %} <b>토스는 모의투자가 없어 실제 주문이 나갑니다.</b>{% endif %}</div>
 </div>
 
-<div class="card">
-  <h2>분석 대상 종목</h2>
+<div class="card sec" id="targets" data-sum="{% if market == 'us' %}미국 {{ c.symbols|length }}종목{% else %}핵심 {{ c.symbols|length }}종목{% if c.auto_count > 0 %} + 자동 {{ (auto['items']|length) if auto and auto['items'] else c.auto_count }}종목{% endif %}{% endif %}">
+  <h2 class="sec-head">분석 대상 종목</h2>
   {% if market == 'us' %}
   <div class="mute">미국 {{ c.symbols|length }}종목 (직접 지정): {{ c.symbols|join(', ') }}</div>
   {% else %}
@@ -170,18 +168,18 @@
   <div style="margin-top:6px"><a href="{{ url_for('settings') }}">조건 바꾸기 →</a></div>
 </div>
 
-<div class="card">
-  <h2>최근 AI 판단</h2>
+<div class="card sec" id="decisions" data-sum="{% if runs %}{{ runs[0].ts[5:16].replace('T',' ') }} · {% set ds = runs[0].decisions %}{% for k, v in [('BUY','매수'),('SELL','매도'),('HOLD','유지')] %}{% set n = ds|selectattr('action','equalto',k)|list|length %}{% if n %}{{ v }} {{ n }} {% endif %}{% endfor %}{% else %}없음{% endif %}">
+  <h2 class="sec-head">최근 AI 판단</h2>
   {% if runs %}{{ run_card(runs[0]) }}{% else %}<div class="mute">아직 없습니다.</div>{% endif %}
 </div>
 
-<div class="card">
-  <h2>최근 주문</h2>
+<div class="card sec" id="orders" data-sum="{% if orders %}{{ orders[0].ts[5:16].replace('T',' ') }} {{ '매수' if orders[0].side == 'BUY' else '매도' }} {{ orders[0].name }} {{ orders[0].qty }}주{% else %}없음{% endif %}">
+  <h2 class="sec-head">최근 주문</h2>
   {{ order_table(orders, c.currency) }}
 </div>
 
-<div class="card">
-  <h2>실행 로그</h2>
+<div class="card sec" id="logs" data-sum="{% if logs %}{{ logs[0].ts[5:16].replace('T',' ') }} 마지막 실행{% else %}없음{% endif %}">
+  <h2 class="sec-head">실행 로그</h2>
   {% for l in logs %}{{ log_item(l) }}{% else %}<div class="mute">없음</div>{% endfor %}
   <div style="margin-top:8px"><a href="{{ url_for('history') }}">전체 기록 →</a></div>
 </div>

@@ -104,5 +104,38 @@ details summary{cursor:pointer;color:var(--mute)}
 {% block body %}{% endblock %}
 <div class="mute" style="text-align:center;margin:18px 0 8px;font-size:12px">ai-trader v{{ app_version }}</div>
 </main>
+<script>
+// 카드 접기/펼치기 (.card.sec) — 주소 끝 #이름 의 카드는 펼쳐서 연다
+(function () {
+  if (!document.querySelector('.card.sec')) return;
+  var secs = Array.prototype.slice.call(document.querySelectorAll('.card.sec'));
+  var save = document.getElementById('mainsave');
+  function sync() {
+    if (save) save.style.display = secs.some(function (s) { return s.classList.contains('main-form') && s.classList.contains('open'); }) ? '' : 'none';
+  }
+  function set(s, on) { s.classList.toggle('open', on); sync(); }
+  secs.forEach(function (s) {
+    var h = s.querySelector('.sec-head');
+    var sum = document.createElement('div'); sum.className = 'sec-sum mute'; sum.textContent = s.dataset.sum || '';
+    h.insertAdjacentElement('afterend', sum);
+    h.setAttribute('role', 'button'); h.tabIndex = 0;
+    h.addEventListener('click', function () { set(s, !s.classList.contains('open')); });
+    h.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); h.click(); } });
+  });
+  function openHash() {
+    var id = (location.hash || '').slice(1), t = id && document.getElementById(id);
+    if (t && t.classList.contains('sec')) { set(t, true); t.scrollIntoView({block: 'start'}); }
+  }
+  window.addEventListener('hashchange', openHash);
+  openHash(); sync();
+  var oa = document.getElementById('openall'), ca = document.getElementById('closeall');
+  if (oa) oa.onclick = function () { secs.forEach(function (s) { set(s, true); }); };
+  if (ca) ca.onclick = function () { secs.forEach(function (s) { set(s, false); }); };
+  document.addEventListener('invalid', function (e) {
+    var s = e.target.closest('.card.sec'); if (s) set(s, true);
+  }, true);
+})();
+</script>
+
 </body>
 </html>

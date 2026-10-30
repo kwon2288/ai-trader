@@ -1,13 +1,15 @@
 {% extends "base.html" %}
+{% from "_macros.html" import sec_toolbar %}
 {% block title %}AI 사용량 · AI 자동매매{% endblock %}
 {% block body %}
 {% macro usd(v) %}{% if v is none %}-{% elif v < 0.01 and v > 0 %}${{ "%.4f"|format(v) }}{% else %}${{ "%.2f"|format(v) }}{% endif %}{% endmacro %}
 {% macro krw(v) %}{% if v is not none %}<span class="mute">≈{{ "{:,.0f}".format(v * 1400) }}원</span>{% endif %}{% endmacro %}
-<div class="card">
-  <h2>AI 사용량 · 비용</h2>
+{{ sec_toolbar() }}
+<div class="card sec" id="summary" data-sum="{{ {'month':'이번 달','30d':'최근 30일','all':'전체'}.get(p, '') }} ${{ '%.2f'|format(summ.cost) }} · 호출 {{ summ.calls }}회">
+  <h2 class="sec-head">AI 사용량 · 비용</h2>
   <div class="pills">
     {% for k, v in [('month','이번 달'),('30d','최근 30일'),('all','전체')] %}
-    <a href="{{ url_for('usage', p=k) }}" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
+    <a href="{{ url_for('usage', p=k) }}#summary" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
   </div>
   <div class="stats">
     <div class="stat"><div class="k">비용</div><div class="v">{{ usd(summ.cost) }}</div>{{ krw(summ.cost) }}</div>
@@ -28,8 +30,9 @@
   {% else %}<div class="mute">아직 기록이 없어요. 이 버전부터 AI를 부를 때마다 쌓여요.</div>{% endif %}
 </div>
 
-<div class="card">
-  <h2>${{ "%g"|format(st.budget) }} 충전하면 얼마나 쓸까</h2>
+{% set cl = proj.get('claude') %}
+<div class="card sec" id="forecast" data-sum="{% for prov, x in proj.items() %}{% if x.calls or x.has_key %}{{ x.label }} {% if x.free %}무료{% elif x.months is none %}-{% elif x.months >= 24 %}{{ '%.0f'|format(x.months / 12) }}년+{% else %}{{ '%.1f'|format(x.months) }}개월{% endif %}{% if x.remaining is not none %}(잔액 ${{ '%.2f'|format(x.remaining) }}){% endif %}   {% endif %}{% endfor %}">
+  <h2 class="sec-head">${{ "%g"|format(st.budget) }} 충전하면 얼마나 쓸까</h2>
   <div class="mute">최근 {{ days }}일 사용량으로 계산한 예상이에요. 기록이 쌓일수록 정확해져요.</div>
   <div class="scroll" style="margin-top:8px"><table>
     <tr><th>AI</th><th class="r">하루 평균</th><th class="r">한 달 예상</th><th class="r">${{ "%g"|format(st.budget) }}로</th></tr>
@@ -59,8 +62,8 @@
   {% endif %}
 </div>
 
-<div class="card" id="models">
-  <h2>AI · 모델 바꾸기</h2>
+<div class="card sec" id="models" data-sum="{{ providers.get(c.ai_provider, c.ai_provider).split(' (')[0].split(' —')[0] }} · {{ c.ai_models.values()|join(', ') }}">
+  <h2 class="sec-head">AI · 모델 바꾸기</h2>
   <form method="post" action="{{ url_for('usage_models') }}">
     <label for="provider">판단에 쓸 AI</label>
     <select id="provider" name="provider">
@@ -82,8 +85,8 @@
     다수결은 키가 있는 AI 모두의 비용이 더해져요. 규칙필터(토큰 절약)는 설정 → AI 에서.</div>
 </div>
 
-<div class="card">
-  <h2>계산 설정</h2>
+<div class="card sec" id="calc" data-sum="기준 ${{ '%g'|format(st.budget) }} · Gemini {{ '무료' if st.free.get('gemini') else '유료' }} · 단가표 · 충전 기록">
+  <h2 class="sec-head">계산 설정</h2>
   <form method="post" action="{{ url_for('usage_settings') }}">
     <div class="grid2">
       <div><label for="budget">‘얼마나 쓸까’ 기준 금액 ($)</label><input id="budget" name="budget" value="{{ '%g'|format(st.budget) }}" inputmode="decimal"></div>

@@ -46,3 +46,10 @@
   <pre>{{ l.output }}</pre>
 </details>
 {% endmacro %}
+
+{% macro sec_toolbar() %}
+<div class="row" style="justify-content:flex-end;margin-bottom:8px;gap:6px">
+  <button type="button" class="btn" id="openall" style="padding:5px 12px;font-size:13px">모두 펼치기</button>
+  <button type="button" class="btn" id="closeall" style="padding:5px 12px;font-size:13px">모두 접기</button>
+</div>
+{% endmacro %}
