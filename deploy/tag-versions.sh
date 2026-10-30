@@ -4,7 +4,8 @@
 #   bash deploy/tag-versions.sh --dry    # 무엇을 만들지 보기만
 set -euo pipefail
 cd "$(dirname "$0")/.."
-git fetch --quiet --tags origin
+git fetch --quiet --tags origin 2>/dev/null || git fetch --quiet origin || true
+ref=origin/main; git rev-parse -q --verify "$ref" >/dev/null || ref=HEAD
 made=0
 while read -r sha subject; do
   ver="${subject%%:*}"
@@ -16,7 +17,7 @@ while read -r sha subject; do
     git tag -a "$ver" "$sha" -m "${subject#*: }" && echo "  + $ver  ${subject#*: }"
   fi
   made=$((made + 1))
-done < <(git log --reverse --format='%h %s' origin/main)
+done < <(git log --reverse --format='%h %s' "$ref")
 if [ "$made" = 0 ]; then echo "✅ 새로 달 태그가 없습니다."; exit 0; fi
 [ "${1:-}" = "--dry" ] && exit 0
 git push --quiet origin --tags && echo "✅ 태그 ${made}개를 GitHub에 올렸습니다."
