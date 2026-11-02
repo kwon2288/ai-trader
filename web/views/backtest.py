@@ -30,7 +30,10 @@ def _run_backtest(market: str, p: dict) -> None:
                 f" — 추천: {label(best['signal'])} · 손절 {best['stop']}% · 익절 +{best['take']}% · "
                 f"보유 {best['min_hold']}~{best['max_hold'] or '∞'}일 · "
                 f"시장필터 {'켬' if best['market_filter'] else '끔'} · 코어 {best['core_pct']}% → 수익률 "
-                f"{best['return_pct']:+.2f}% (낙폭 {best['mdd_pct']}%)" if best else ""))
+                f"{best['return_pct']:+.2f}% (낙폭 {best['mdd_pct']}%)"
+                + (f", 뒤 기간 {best['oos_return_pct']:+.2f}%" if "oos_return_pct" in best else "") if best else "")
+                + (f"\n앞/뒤 기간 검증: 상위 {r['validation']['top']}개 중 뒤 기간 플러스 "
+                   f"{r['validation']['oos_positive']}개" if r.get("validation") else ""))
             return
         res = backtest.run_job(c, make_broker(c), p["days"], p["stop"], p["take"], p["symbols"], BENCH[market][0],
                                progress=prog, min_hold=p.get("min_hold"), market_filter=p.get("market_filter"),

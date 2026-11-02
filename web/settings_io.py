@@ -13,6 +13,7 @@ FIELDS = [
     ("risk", "stop_loss_pct", float, -50, -0.5, "손절 (%)"),
     ("risk", "take_profit_pct", float, 0.5, 200, "익절 (%)"),
     ("risk", "max_drawdown_pct", float, -90, -1, "최대 손실 시 정지 (%)"),
+    ("risk", "daily_loss_pct", float, -50, 0, "하루 손실 한도 (%, 0 = 끔) — 넘으면 그날 새로 안 삼"),
     ("risk", "max_orders_per_day", int, 0, 50, "하루 최대 주문 수"),
     ("risk", "min_confidence", float, 0, 1, "최소 AI 확신도 (0~1)"),
     ("risk", "min_hold_days", int, 0, 60, "최소 보유일"),
@@ -26,7 +27,7 @@ AUTO_FIELDS = [
     ("universe", "auto_min_price", int, 0, 1_000_000, "최소 주가 (원)"),
     ("universe", "auto_scan_pool", int, 20, 1000, "시세 조회 범위 (시총 상위 N개)"),
 ]
-DEFAULTS = {"auto_count": 10, "auto_min_cap_eok": 3000, "auto_min_price": 1000, "auto_scan_pool": 200}
+DEFAULTS = {"daily_loss_pct": 0, "auto_count": 10, "auto_min_cap_eok": 3000, "auto_min_price": 1000, "auto_scan_pool": 200}
 US_FIELDS = [
     ("us", "total_usd", float, 10, 10_000_000, "미국 원금 ($)"),
     ("us", "max_per_position_usd", float, 1, 10_000_000, "미국 종목당 최대 ($)"),

@@ -27,7 +27,7 @@ def settings():
             return redirect(url_for("settings"))
     raw = settings_io.read(webapp.CONFIG_PATH)
     from trader.ledger import DEFAULT_COSTS
-    fields = [(key, label, raw.get(sec, {}).get(key, DEFAULT_COSTS.get(key, "")))
+    fields = [(key, label, raw.get(sec, {}).get(key, DEFAULT_COSTS.get(key, settings_io.DEFAULTS.get(key, ""))))
               for sec, key, _t, _lo, _hi, label in settings_io.FIELDS]
     auto_fields = [(key, label, raw.get(sec, {}).get(key, settings_io.DEFAULTS.get(key, "")))
                    for sec, key, _t, _lo, _hi, label in settings_io.AUTO_FIELDS]

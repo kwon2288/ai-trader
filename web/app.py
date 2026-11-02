@@ -191,16 +191,32 @@ def login_required(fn):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    from web import loginguard
     if request.method == "POST":
-        pw = os.environ.get("WEB_PASSWORD", "")
-        if pw and hmac.compare_digest(request.form.get("password", ""), pw):
-            session.clear()
-            session["ok"] = True
-            session.permanent = True
-            nxt = request.args.get("next", "/")
-            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
-        time.sleep(1.5)  # 무차별 대입 지연
-        flash("비밀번호가 틀렸습니다.", "err")
+        ip = loginguard.client_ip(request)
+        left = loginguard.blocked(ip)
+        if left:
+            time.sleep(1.0)
+            flash(f"로그인 시도가 너무 많아 잠시 막혔어요 — 약 {left // 60 + 1}분 뒤 다시 시도하거나 패스키로 로그인하세요.", "err")
+        else:
+            pw = os.environ.get("WEB_PASSWORD", "")
+            if pw and hmac.compare_digest(request.form.get("password", ""), pw):
+                loginguard.success(ip)
+                session.clear()
+                session["ok"] = True
+                session.permanent = True
+                nxt = request.args.get("next", "/")
+                return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
+            time.sleep(1.5)  # 무차별 대입 지연
+            msg = loginguard.fail(ip)
+            if msg:
+                c = cfg()
+                Journal(c.db_path).add_log(c.ledger, "security", "web", msg)
+                from trader import notify
+                notify.send(c, "errors", msg)
+                flash("로그인 시도가 너무 많아 15분 동안 막았어요.", "err")
+            else:
+                flash("비밀번호가 틀렸습니다.", "err")
     from web import passkeys
     return render_template("login.html", has_passkeys=bool(passkeys.load(cfg().data_dir)))
 

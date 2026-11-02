@@ -123,9 +123,22 @@ def pnl():
             agg[d[:7] + "-01"] = agg.get(d[:7] + "-01", 0) + v
         days = sorted(agg.items())
     cmp_ = _compare_bench(c, j, start, end)
-    return render_template("pnl.html", c=c, base=base, market=m, r=r, periods=PERIODS, p=p, cmp=cmp_,
+    from trader import pricing
+    ai = pricing.ai_cost(j, c.data_dir, c.ledger, start, end)
+    fx = float(j.get("fx_usdkrw") or 0) or 1400.0
+    ai["local"] = ai["usd"] if c.currency == "USD" else round(ai["usd"] * fx)
+    ai["fx"] = fx
+    ai["net"] = round(r["pnl"] - ai["local"], 2)
+    if cmp_ and snap_budget(j, c):
+        ai["net_pct"] = round(cmp_["bot_pct"] - ai["local"] / snap_budget(j, c) * 100, 2)
+    return render_template("pnl.html", c=c, base=base, market=m, r=r, periods=PERIODS, p=p, cmp=cmp_, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
                            snap=j.snapshot(c.ledger))
+
+
+def snap_budget(j, c) -> float:
+    s = j.snapshot(c.ledger) or {}
+    return float(s.get("budget") or c.total_krw or 0)
 
 
 def _usage_summary(j, st: dict, since: str | None) -> dict:

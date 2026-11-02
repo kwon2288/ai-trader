@@ -58,6 +58,7 @@ class Config:
     mode: str = "dry"
     mode_source: str = "env"          # env=.env 의 TRADING_MODE, web=웹에서 바꿈(data/mode.json)
     live_ack: bool = False            # 웹에서 실계좌 전환 확인을 거쳤는지
+    daily_loss_pct: float = 0.0       # 하루 손실 한도 (예산 대비 %, 0 = 끔)
     kr_base: "Config | None" = field(default=None, repr=False, compare=False)   # 미국 설정에서 국내 설정으로 돌아갈 때
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
 
@@ -151,6 +152,7 @@ def load(config_path: Path | None = None) -> Config:
         stop_loss_pct=float(r["stop_loss_pct"]),
         take_profit_pct=float(r["take_profit_pct"]),
         max_drawdown_pct=float(r["max_drawdown_pct"]),
+        daily_loss_pct=float(r.get("daily_loss_pct", 0) or 0),
         max_orders_per_day=int(r["max_orders_per_day"]),
         min_confidence=float(r["min_confidence"]),
         min_hold_days=int(r.get("min_hold_days", 0)),

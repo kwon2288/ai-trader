@@ -80,3 +80,23 @@ def model_options(fields: list, st: dict) -> list:
         extra = [(m, f"{m} · 직접 추가") for m in sorted(st.get("prices", {})) if provider_of(m) == prov and m not in have]
         out.append((key, label, list(opts) + extra))
     return out
+
+
+def ai_cost(j, data_dir, ledger: str | None, start=None, end=None) -> dict:
+    """기간 AI 비용 (USD). ledger 를 주면 그 장부(시장) 실행에서 쓴 것만. 반환: {usd, calls, unknown}"""
+    st = settings(data_dir)
+    usd, calls, unknown = 0.0, 0, 0
+    a = start.isoformat() if start else None
+    b = end.isoformat() if end else None
+    for r in j.usage(a):
+        if b and r["ts"][:10] > b:
+            continue
+        if ledger and r.get("ledger") and r["ledger"] != ledger:
+            continue
+        calls += 1
+        c = cost(r["provider"], r["model"], r["tin"], r["tout"], st)
+        if c is None:
+            unknown += 1
+        else:
+            usd += c
+    return {"usd": round(usd, 4), "calls": calls, "unknown": unknown}

@@ -55,6 +55,9 @@ class NHUSBroker(NHBroker):
             sector=(o.get("industry_name") or "").strip(),
             per=_num(o.get("per_prc")), pbr=0.0, foreign_pct=0.0,
             w52_high=_f(o.get("w52high_prc")), w52_low=_f(o.get("w52low_prc")), warnings=[],
+            day_open=_f(o.get("normal_open_prc") or o.get("open_prc")),
+            day_high=_f(o.get("normal_high") or o.get("high")), day_low=_f(o.get("normal_low") or o.get("low")),
+            day_volume=_num(o.get("normal_acvol") or o.get("acvol")),
         )
 
     def daily(self, code: str, n: int = 80) -> list[dict]:

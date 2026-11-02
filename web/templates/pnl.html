@@ -30,13 +30,19 @@
     <div class="stat"><div class="k">최고 / 최저</div>
       <div class="v" style="font-size:15px">{% if r.best %}{{ pct(r.best.pnl_pct) }} / {{ pct(r.worst.pnl_pct) }}{% else %}-{% endif %}</div>
       {% if r.best %}<div class="mute">{{ r.best.name }} / {{ r.worst.name }}</div>{% endif %}</div>
+    <div class="stat"><div class="k">AI 비용</div>
+      <div class="v"><span class="{{ 'down' if ai.local > 0 }}">−{{ money(ai.local, cur) }}</span></div>
+      <div class="mute">{{ ai.calls }}회 호출{% if cur != 'USD' %} · ${{ "%.2f"|format(ai.usd) }} (환율 {{ "{:,.0f}".format(ai.fx) }}){% endif %}{% if ai.unknown %} · 단가 모르는 {{ ai.unknown }}회 제외{% endif %}</div></div>
+    <div class="stat"><div class="k">AI 비용 뺀 실현 손익</div>
+      <div class="v"><span class="{{ 'up' if ai.net > 0 else ('down' if ai.net < 0 else '') }}">{{ ('+' if ai.net > 0 else '') ~ money(ai.net, cur) }}</span></div>
+      <div class="mute">이게 플러스여야 AI 를 쓰는 의미가 있어요</div></div>
   </div>
   {% if chart %}{{ chart|safe }}<div class="mute">{{ '월별' if monthly else '일별' }} 실현 손익</div>{% endif %}
   {% if cmp %}
   <h2 style="margin-top:16px">시장과 비교</h2>
   <div class="stats">
     <div class="stat"><div class="k">봇 (예산 대비)</div><div class="v">{{ pct(cmp.bot_pct) }}</div>
-      <div class="mute">실현 + 평가 손익 변화</div></div>
+      <div class="mute">실현 + 평가 손익 변화{% if ai.net_pct is defined and ai.local %} · AI 비용 빼면 {{ "%+.2f"|format(ai.net_pct) }}%{% endif %}</div></div>
     <div class="stat"><div class="k">{{ cmp.bench_name }}</div><div class="v">{% if cmp.bench_pct is not none %}{{ pct(cmp.bench_pct) }}{% else %}-{% endif %}</div>
       <div class="mute">{% if cmp.bench_pct is not none %}{{ '봇이 지수보다 ' ~ ('%.2f'|format((cmp.bot_pct - cmp.bench_pct)|abs)) ~ '%p ' ~ ('앞섬 ✅' if cmp.bot_pct > cmp.bench_pct else '뒤처짐') }}{% elif cmp.bench_err %}지수 조회 실패{% else %}데이터 없음{% endif %}</div></div>
   </div>

@@ -60,8 +60,10 @@ def _regime_map(bench: list[dict] | None) -> dict[str, bool]:
 def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *, stop_pct=None, take_pct=None,
         bench: list[dict] | None = None, min_hold: int | None = None, market_filter: bool = False,
         core_pct: float = 0, core_code: str | None = None, core_bars: list[dict] | None = None,
-        ind_cache: dict | None = None, signal_mode: str = "trend", max_hold: int = 0) -> dict:
-    """data: 종목코드 → 일봉(오래된→최신). 반환: 결과 요약·자산 곡선·거래 내역."""
+        ind_cache: dict | None = None, signal_mode: str = "trend", max_hold: int = 0,
+        date_from: str | None = None, date_to: str | None = None) -> dict:
+    """data: 종목코드 → 일봉(오래된→최신). 반환: 결과 요약·자산 곡선·거래 내역.
+    date_from/date_to(YYYYMMDD): 그 기간에만 사고판다 (지표는 앞 데이터로 계산) — 앞/뒤 기간 검증용."""
     names = names or {}
     stop = cfg.stop_loss_pct if stop_pct is None else stop_pct
     take = cfg.take_profit_pct if take_pct is None else take_pct
@@ -99,6 +101,10 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
                        "pnl_pct": round(pnl / p["cost"] * 100, 2) if p["cost"] else 0.0, "why": why})
 
     for di, d in enumerate(dates):
+        if date_to and d > date_to:
+            break
+        if date_from and d < date_from:
+            continue
         # 1) 어제 신호를 오늘 시가에 실행 (매도 먼저)
         for side, code, _s, why in sorted(pending, key=lambda x: (x[0] != "SELL", -x[2])):
             i = by_date[code].get(d)
@@ -320,17 +326,27 @@ def sweep(cfg, broker, days: int, symbols: list[str], bench_code: str, progress=
     ind_cache: dict = {}
     keys = ("signal", "stop", "take", "min_hold", "max_hold", "market_filter", "core_pct")
     combos = list(product(*(g[k] for k in keys)))
+    # 앞/뒤 기간 검증: 앞 2/3 로 순위를 매기고(고르기), 뒤 1/3 에서 그대로 통하는지 본다(확인)
+    all_dates = sorted({b["date"] for v in data.values() for b in v})
+    usable = all_dates[WARMUP:]
+    cut = usable[int(len(usable) * 2 / 3)] if len(usable) >= 60 else None
+    is_to = usable[int(len(usable) * 2 / 3) - 1] if cut else None
     rows = []
     for k, (sm, st, tk, mh, xh, mf, cp) in enumerate(combos, 1):
         if progress and (k % 4 == 1 or k == len(combos)):
             progress(k, len(combos), f"조합 {k}/{len(combos)}")
-        r = run(cfg, data, names, stop_pct=st, take_pct=tk, bench=bench, min_hold=mh, market_filter=mf,
-                core_pct=cp, core_code=sg["core_code"], core_bars=core_bars, ind_cache=ind_cache,
-                signal_mode=sm, max_hold=xh)
-        rows.append({"signal": sm, "stop": st, "take": tk, "min_hold": mh, "max_hold": xh, "market_filter": mf,
-                     "core_pct": cp, "return_pct": r["return_pct"], "mdd_pct": r["mdd_pct"], "n": r["n"],
-                     "win_rate": r["win_rate"], "fees": r["fees"], "bench_pct": r.get("bench_pct"),
-                     "avg_trade_pct": r["avg_trade_pct"], "gross_return_pct": r["gross_return_pct"]})
+        kw = dict(stop_pct=st, take_pct=tk, bench=bench, min_hold=mh, market_filter=mf, core_pct=cp,
+                  core_code=sg["core_code"], core_bars=core_bars, ind_cache=ind_cache, signal_mode=sm, max_hold=xh)
+        r = run(cfg, data, names, date_to=is_to, **kw)
+        row = {"signal": sm, "stop": st, "take": tk, "min_hold": mh, "max_hold": xh, "market_filter": mf,
+               "core_pct": cp, "return_pct": r["return_pct"], "mdd_pct": r["mdd_pct"], "n": r["n"],
+               "win_rate": r["win_rate"], "fees": r["fees"], "bench_pct": r.get("bench_pct"),
+               "avg_trade_pct": r["avg_trade_pct"], "gross_return_pct": r["gross_return_pct"]}
+        if cut:
+            o = run(cfg, data, names, date_from=cut, **kw)
+            row.update(oos_return_pct=o["return_pct"], oos_mdd_pct=o["mdd_pct"], oos_n=o["n"],
+                       oos_bench_pct=o.get("bench_pct"), oos_avg_trade_pct=o["avg_trade_pct"])
+        rows.append(row)
     # 추천: 수익률만 보지 않고 낙폭을 함께 본다 (수익률 − 0.5 × |최대 낙폭|), 거래가 너무 적은 조합은 뒤로
     few = 10 if kind == "short" else 5
     for x in rows:
@@ -345,7 +361,16 @@ def sweep(cfg, broker, days: int, symbols: list[str], bench_code: str, progress=
            "bench_pct": rows[0]["bench_pct"] if rows else None, "rows": rows, "seconds": round(time.time() - t0, 1),
            "start": None, "end": None, "fee_pct": rows and costs_of(cfg)["us_fee_pct" if cfg.market == "us" else "kr_fee_pct"],
            "best_by_signal": list(best_by.values()),
-           "positive": sum(1 for x in rows if x["return_pct"] > 0)}
+           "positive": sum(1 for x in rows if x["return_pct"] > 0),
+           "split": {"is_end": is_to, "oos_start": cut} if cut else None}
+    if cut:
+        top = rows[:10]
+        out["validation"] = {
+            "top": len(top), "oos_positive": sum(1 for x in top if x["oos_return_pct"] > 0),
+            "oos_beat_bench": sum(1 for x in top if x.get("oos_bench_pct") is not None
+                                  and x["oos_return_pct"] > x["oos_bench_pct"]),
+            "oos_bench_pct": top[0].get("oos_bench_pct") if top else None,
+            "oos_avg_top": round(sum(x["oos_return_pct"] for x in top) / len(top), 2) if top else None}
     if data:
         dd = sorted({b["date"] for v in data.values() for b in v})
         out["start"], out["end"] = dd[min(WARMUP, len(dd) - 1)], dd[-1]

@@ -59,6 +59,11 @@ class Quote:
     w52_high: int
     w52_low: int
     warnings: list[str] = field(default_factory=list)  # 투자유의·경고·정리매매·단기과열 등
+    # 오늘 시가·고가·저가·누적 거래량 (증권사가 주면) — 일봉 캐시에서 오늘 봉을 만들 때 씀. 0 이면 모름
+    day_open: float = 0
+    day_high: float = 0
+    day_low: float = 0
+    day_volume: float = 0
 
 
 @dataclass
@@ -256,6 +261,8 @@ class NHBroker:
             w52_high=_int(o.get("w52_hgpr")),
             w52_low=_int(o.get("w52_lwpr")),
             warnings=warns,
+            day_open=_int(o.get("stck_oprc")), day_high=_int(o.get("stck_hgpr")),
+            day_low=_int(o.get("stck_lwpr")), day_volume=_int(o.get("acml_vol")),
         )
 
     def _market_status(self, code: str, o: dict) -> str:

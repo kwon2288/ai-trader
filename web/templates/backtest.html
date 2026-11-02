@@ -57,13 +57,25 @@
   </div>
   <div class="mute" style="margin-bottom:8px">플러스로 끝난 조합 {{ sw.positive }}/{{ sw.rows|length }}개{% if sw.fee_pct %} · 수수료 한쪽 {{ sw.fee_pct }}% 기준{% endif %}</div>
   {% endif %}
+  {% set v = sw.validation %}
+  {% if v %}
+  {% set d1, d2 = sw.split.is_end, sw.split.oos_start %}
+  <div class="flash" style="margin:0 0 10px;background:{{ 'var(--okbg)' if v.oos_positive >= 7 else ('var(--warnbg)' if v.oos_positive >= 4 else 'var(--errbg)') }};color:{{ 'var(--ok)' if v.oos_positive >= 7 else ('var(--warn)' if v.oos_positive >= 4 else 'var(--err)') }}">
+    <b>앞/뒤 기간 검증</b> — 앞 기간(~{{ d1[2:4] }}.{{ d1[4:6] }}.{{ d1[6:] }})으로 순위를 매긴 상위 {{ v.top }}개를
+    뒤 기간({{ d2[2:4] }}.{{ d2[4:6] }}.{{ d2[6:] }}~)에 그대로 돌리면 <b>{{ v.oos_positive }}개가 플러스</b>,
+    {{ v.oos_beat_bench }}개가 지수보다 나음 (상위 평균 {{ "%+.2f"|format(v.oos_avg_top) }}%{% if v.oos_bench_pct is not none %} · 지수 {{ "%+.2f"|format(v.oos_bench_pct) }}%{% endif %}).
+    {% if v.oos_positive >= 7 %}과거에 고른 조건이 다음 기간에도 대체로 통했어요.
+    {% elif v.oos_positive >= 4 %}반반이에요 — 운이 섞였을 수 있어요.
+    {% else %}앞 기간에 좋았던 조건이 뒤 기간엔 대부분 안 통했어요 — 과거에 끼워 맞춘(과최적화) 결과일 가능성이 커요.{% endif %}</div>
+  {% endif %}
   <div class="scroll"><table>
-    <tr><th>#</th><th>조건</th><th class="r">수익률 · 낙폭</th><th></th></tr>
+    <tr><th>#</th><th>조건</th><th class="r">{{ '앞 기간 (고르기)' if v else '수익률 · 낙폭' }}</th>{% if v %}<th class="r">뒤 기간 (확인)</th>{% endif %}<th></th></tr>
     {% for x in sw.rows[:15] %}
     <tr {% if loop.first %}style="background:var(--okbg)"{% endif %}>
       <td>{{ loop.index }}{% if loop.first %}<div style="font-size:11px">추천</div>{% endif %}</td>
       <td style="font-size:13px">{% if sw.kind == 'short' %}<b>{{ modes.get(x.signal, x.signal) }}</b> · {% endif %}손절 {{ x.stop }}% · 익절 +{{ x.take }}%<div class="mute">{% if sw.kind == 'short' %}최대 {{ (x.max_hold ~ '일') if x.max_hold else '제한 없음' }}{% else %}보유 {{ x.min_hold }}일{% endif %}{{ ' · 필터' if x.market_filter }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회{% if x.avg_trade_pct is defined and x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></td>
       <td class="r nw">{{ pct(x.return_pct) }}<div class="mute"><span class="down">{{ "%.1f"|format(x.mdd_pct) }}%</span>{{ ' · 지수↑' if x.bench_pct is not none and x.return_pct > x.bench_pct }}</div></td>
+      {% if v %}<td class="r nw">{{ pct(x.oos_return_pct) }}{{ ' ✅' if x.oos_return_pct > 0 }}<div class="mute"><span class="down">{{ "%.1f"|format(x.oos_mdd_pct) }}%</span> · {{ x.oos_n }}회{{ ' · 지수↑' if x.oos_bench_pct is not none and x.oos_return_pct > x.oos_bench_pct }}</div></td>{% endif %}
       <td><form method="post" action="{{ url_for('strategy_apply') }}" class="inline"
             onsubmit="return confirm('이 조건을 실제 설정에 적용할까요? (국내·미국 공통, 다음 실행부터)')">
         <input type="hidden" name="stop" value="{{ x.stop }}"><input type="hidden" name="take" value="{{ x.take }}">
@@ -73,7 +85,9 @@
         <button class="btn" style="padding:4px 9px;font-size:12px;white-space:nowrap">적용</button></form></td></tr>
     {% endfor %}
   </table></div>
-  <div class="mute" style="margin-top:6px">순위 = 수익률 − 최대 낙폭의 절반 (많이 벌어도 크게 흔들리면 감점). 과거에 가장 잘 맞은 조건이
+  <div class="mute" style="margin-top:6px">{% if v %}<b>앞 기간</b>(전체의 앞 2/3)으로만 순위를 매기고, 그 조건을 본 적 없는 <b>뒤 기간</b>(뒤 1/3)에 그대로 돌려 확인해요.
+    실제로 쓸 때와 같은 상황(과거로 고르고 미래에 쓰기)이라, 뒤 기간 ✅ 이 많은 조건일수록 믿을 만해요.<br>{% endif %}
+    순위 = 앞 기간 수익률 − 최대 낙폭의 절반 (많이 벌어도 크게 흔들리면 감점). 과거에 가장 잘 맞은 조건이
     앞으로도 최고라는 보장은 없어요 — 1등만 보지 말고 비슷한 조건들이 고르게 상위권인지 보세요(그게 더 믿을 만해요).
     ‘적용’하면 매매 신호·손절·익절·최소/최대 보유일·시장 필터·코어 비중이 실제 설정으로 들어가요.<br>
     <b>거래당</b> = 수수료·세금을 뺀 한 번 거래의 평균 수익률. 단기 매매는 이게 플러스여야 오래 할수록 벌어요.</div>

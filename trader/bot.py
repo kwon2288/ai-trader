@@ -47,6 +47,22 @@ def account_view(bal, held: dict) -> dict:
             "cash": cash}
 
 
+CLOSE = {"kr": ("Asia/Seoul", 15, 30), "us": ("America/New_York", 16, 0)}
+CLOSE_WINDOW_MIN = 30          # 장중 감시 간격(최대 30분)과 맞춤
+
+
+def near_close(market: str, at=None) -> int:
+    """정규장 마감까지 남은 분 (마감 30분 전 ~ 마감 사이일 때만, 아니면 0)."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    tz, hh, mm = CLOSE.get(market, CLOSE["kr"])
+    t = (at or _dt.now(ZoneInfo(tz))).astimezone(ZoneInfo(tz))
+    if t.weekday() >= 5:
+        return 0
+    left = (hh * 60 + mm) - (t.hour * 60 + t.minute)
+    return left if 0 < left <= CLOSE_WINDOW_MIN else 0
+
+
 class Bot:
     def __init__(self, cfg: Config, broker, analyst, journal: Journal | None = None):
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
@@ -55,6 +71,15 @@ class Bot:
         self.orders_left = 0
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
         self.no_buy_reason = None
+        self.stages: list[tuple[str, float]] = []    # 단계별 걸린 시간 (실행 로그 끝에 표시)
+        self._mark = None
+
+    def stage(self, name: str) -> None:
+        """직전 표시 이후 걸린 시간을 name 단계로 기록."""
+        t = time.monotonic()
+        if self._mark is not None:
+            self.stages.append((name, t - self._mark))
+        self._mark = t
 
     def say(self, s: str) -> None:
         log.info(s)
@@ -118,6 +143,32 @@ class Bot:
                 self.j.reduce_position(code, qty)
         return True
 
+    def _daily_loss_check(self, st: dict) -> None:
+        cfg = self.cfg
+        if cfg.market == "us":
+            from zoneinfo import ZoneInfo
+            day = now().astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        else:
+            day = now().date().isoformat()
+        key = f"day_start_{cfg.ledger}"
+        saved = (self.j.get(key) or "").split("|")
+        if len(saved) != 2 or saved[0] != day:
+            self.j.set(key, f"{day}|{st['equity']}")       # 그날 첫 실행 — 기준 자산 기록
+            return
+        limit = float(getattr(cfg, "daily_loss_pct", 0) or 0)
+        budget = float(st.get("budget") or 0)
+        if not limit or not budget:
+            return
+        chg = (float(st["equity"]) - float(saved[1])) / budget * 100
+        if chg <= limit:
+            self.no_buy_reason = f"하루 손실 한도 — 오늘 {chg:+.1f}% (한도 {limit}%)"
+            self.say(f"🧯 {self.no_buy_reason} → 오늘은 새로 사지 않아요 (매도·손절은 그대로)")
+            flag = f"daily_loss_notified_{cfg.ledger}"
+            if self.j.get(flag) != day:
+                self.j.set(flag, day)
+                self.notify("halt", f"🧯 {self._mk()} 하루 손실 한도 도달 — 오늘 봇 손익 {chg:+.1f}% "
+                                    f"(한도 {limit}%). 오늘은 새로 사지 않아요.")
+
     # ── 손절·익절 (정기 실행과 장중 감시가 함께 씀) ─────────
     def _exit_trigger(self, h) -> str | None:
         pnl = round(h.pnl_pct, 6)              # 부동소수 오차(14.9999…%) 방지
@@ -156,9 +207,14 @@ class Bot:
         if cfg.stop_file.exists():
             return "킬스위치로 정지 중", False
         from . import fills, ledger
+        closing = near_close(cfg.market)
+        if closing:
+            self.say(f"🔔 장 마감 {closing}분 전 — 남은 미체결 주문을 정리해요")
         try:
+            # 평소엔 30분 넘게 안 된 주문만 취소, 장 마감 직전엔 남은 것 모두 취소 (넘겨도 장 끝나면 무효)
+            cut = now() - timedelta(minutes=5 if closing else 30)
             fills.reconcile(self.j, cfg, self.broker, self.say, notify=self.notify,
-                            cancel_before=(now() - timedelta(minutes=30)).isoformat(timespec="seconds"))
+                            cancel_before=cut.isoformat(timespec="seconds"))
         except Exception as e:  # noqa: BLE001
             self.say(f"⚠ 체결 확인 중 오류: {e}")
         bal = self.broker.balance()
@@ -207,6 +263,7 @@ class Bot:
         mode_label = {"dry": "드라이런(주문 안 냄)", "mock": "모의투자", "live": "🔴 실계좌"}[cfg.mode]
         market_label = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(cfg.market, cfg.market)
         self.say(f"[{now():%Y-%m-%d %H:%M}] {market_label} · 실행 모드: {mode_label}")
+        self.stages, self._mark = [], time.monotonic()
 
         if cfg.stop_file.exists():
             self.say(f"⏸ 킬스위치 파일({cfg.stop_file.name})이 있어 중단합니다.")
@@ -223,6 +280,7 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             self.say(f"⚠ 체결 확인 중 오류: {e}")
 
+        self.stage("체결 확인")
         # 1) 데이터 수집
         candidates, quotes = [], {}
         bal = self.broker.balance()
@@ -236,13 +294,17 @@ class Bot:
         held = own_holdings(self.j, cfg, bal.holdings, self.say)
         user_owned = {c for c in bal.holdings if c not in bot_codes}   # 사용자가 직접 가진 종목 → 매수 안 함
 
+        from . import barcache
+        self.bar_stats = {}
+
         def collect(codes, source):
             for code in codes:
                 if code in quotes:
                     continue
                 try:
                     q = self.broker.quote(code)
-                    ind = indicators.compute(self.broker.daily(code, 80))
+                    ind = indicators.compute(barcache.daily(self.broker, code, q, cfg.data_dir, cfg.market,
+                                                            80, self.bar_stats))
                 except Exception as e:  # noqa: BLE001
                     self.say(f"⚠ {code} 데이터 조회 실패: {e}")
                     continue
@@ -257,7 +319,10 @@ class Bot:
                     "affordable": q.price <= cfg.max_per_position_krw, **ind,
                 })
 
+        self.stage("잔고")
         collect(list(held) + cfg.symbols, "core")
+        hit = self.bar_stats.get("hit", 0)
+        self.stage(f"시세·일봉 {len(quotes)}종목" + (f"(일봉 캐시 {hit})" if hit else ""))
         if not quotes:
             self.say("데이터를 하나도 받지 못해 종료합니다.")
             return self._out()
@@ -273,6 +338,7 @@ class Bot:
             from . import universe
             auto = universe.ensure_today(cfg, self.broker, self.j, say=self.say)
             collect([a["code"] for a in auto], "auto")
+            self.stage("자동 선정")
 
         # 2) 장부 / 손실 한도
         for c, h in held.items():
@@ -357,6 +423,9 @@ class Bot:
             elif ok is None:
                 self.say(f"🚦 시장 필터 건너뜀 ({why})")
 
+        # 2-3) 하루 손실 한도: 그날 첫 실행 때의 봇 자산 대비 예산의 N% 넘게 빠지면 그날은 새로 사지 않음
+        self._daily_loss_check(st)
+
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
         if not analyze_only:
             self._rule_exits(held, {c: q.price for c, q in quotes.items()}, {c: q.bid for c, q in quotes.items()})
@@ -395,7 +464,9 @@ class Bot:
         # 5) AI 판단
         if cfg.ai_news and not is_rules and candidates:     # 뉴스·공시 (설정에서 켰을 때만)
             from . import news
+            self.stage("규칙·판단 준비")
             k = news.enrich(candidates, cfg.market, cfg.data_dir, self.say)
+            self.stage("뉴스·공시")
             self.say(f"📰 뉴스·공시: {k}/{len(candidates)}종목에 최근 소식 첨부")
 
         ctx = {
@@ -425,6 +496,7 @@ class Bot:
             "recent_decisions": self.j.recent_decisions(mode=cfg.ledger),
         }
         self.say(f"🧠 {getattr(self.analyst, 'label', 'AI')} 에게 {len(candidates)}종목 판단 요청 중…")
+        self.stage("판단 준비")
         t_ai = time.monotonic()
 
         def say_time():
@@ -436,6 +508,7 @@ class Bot:
                 self.say(f"⏱ AI 응답 시간: {getattr(self.analyst, 'label', 'AI').split('(')[0]} {total}초")
         try:
             result = self.analyst.decide(ctx)
+            self.stage("AI")
             say_time()
         except Exception as e:  # noqa: BLE001
             say_time()
@@ -539,6 +612,7 @@ class Bot:
             except Exception as e:  # noqa: BLE001
                 self.say(f"⚠ 체결 확인 중 오류: {e}")
 
+        self.stage("주문·체결 확인")
         self.j.finish_run(run_id, result.get("market_view", ""), result)
         if result.get("_usage"):
             u = result["_usage"]
@@ -546,4 +620,10 @@ class Bot:
         return self._out()
 
     def _out(self) -> str:
+        if self.stages and self._mark is not None:
+            self.stage("마무리")
+            parts = [f"{n} {round(t)}초" for n, t in self.stages if t >= 0.5]
+            total = round(sum(t for _, t in self.stages))
+            self.lines.append(f"⏱ 단계별 시간: {' · '.join(parts) or '모두 1초 미만'} (전체 {total}초)")
+            self._mark = None
         return "\n".join(self.lines)
