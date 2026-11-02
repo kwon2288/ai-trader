@@ -179,9 +179,16 @@
   <div style="margin-top:6px"><a href="{{ url_for('settings') }}">조건 바꾸기 →</a></div>
 </div>
 
-<div class="card sec" id="decisions" data-sum="{% if runs %}{{ runs[0].ts[5:16].replace('T',' ') }} · {% set ds = runs[0].decisions %}{% for k, v in [('BUY','매수'),('SELL','매도'),('HOLD','유지')] %}{% set n = ds|selectattr('action','equalto',k)|list|length %}{% if n %}{{ v }} {{ n }} {% endif %}{% endfor %}{% else %}없음{% endif %}">
+<div class="card sec" id="decisions" data-sum="{% set jr = runs|selectattr('decisions')|list %}{% if jr %}{{ jr[0].ts[5:16].replace('T',' ') }} · {% set ds = jr[0].decisions %}{% for k, v in [('BUY','매수'),('SELL','매도'),('HOLD','유지')] %}{% set n = ds|selectattr('action','equalto',k)|list|length %}{% if n %}{{ v }} {{ n }} {% endif %}{% endfor %}{% else %}없음{% endif %}">
   <h2 class="sec-head">최근 AI 판단</h2>
-  {% if runs %}{{ run_card(runs[0]) }}{% else %}<div class="mute">아직 없습니다.</div>{% endif %}
+  {% set judged = runs|selectattr('decisions')|list %}
+  {% if runs and not runs[0].decisions %}
+  <div class="mute" style="margin-bottom:8px">마지막 실행 {{ runs[0].ts[5:16].replace('T',' ') }}: {{ runs[0].market_view }}</div>
+  {% endif %}
+  {% if judged %}{{ run_card(judged[0]) }}
+  {% elif not runs %}<div class="mute">아직 없습니다.</div>
+  {% else %}<div class="mute">최근 {{ runs|length }}회 실행에서 AI가 판단한 종목이 없어요.</div>{% endif %}
+  <div style="margin-top:8px"><a href="{{ url_for('history') }}">AI 판단 전체 기록 →</a></div>
 </div>
 
 <div class="card sec" id="orders" data-sum="{% if orders %}{{ orders[0].ts[5:16].replace('T',' ') }} {{ '매수' if orders[0].side == 'BUY' else '매도' }} {{ orders[0].name }} {{ orders[0].qty }}주{% else %}없음{% endif %}">
@@ -196,21 +203,34 @@
 </div>
 
 <script>
-// 실행 중이면 끝날 때까지 5초마다 확인 후 새로고침
+// 화면 자동 갱신
+//  - 실행 중이면 5초마다 진행 상황(몇 분째·지금 단계)을 바꾸고, 끝나면 새로고침
+//  - 평소에는 30초마다 확인해 새 실행(자동 포함)이 시작·끝나면 새로고침
+//  - 앱을 다른 화면에 뒀다 돌아오면(아이폰은 백그라운드에서 타이머가 멈춤) 바로 확인
 (function(){
-  if (!document.getElementById('busy')) return;
-  const t = setInterval(async () => {
+  const URL_ = '{{ url_for("api_status") }}';
+  let busy = !!document.getElementById('busy');
+  const lastId = {{ (logs[0].id if logs else none)|tojson }};
+  const loadedAt = Date.now();
+  async function check() {
     try {
-      const r = await fetch('{{ url_for("api_status") }}');
-      const s = await r.json();
-      if (!s.busy) { clearInterval(t); location.reload(); return; }
+      const s = await (await fetch(URL_, {cache: 'no-store'})).json();
+      if (s.busy !== busy || (s.last_log_id ?? null) !== lastId) { location.reload(); return; }
+      if (!s.busy) return;
       const i = s.info || {};
       const mk = {kr: '국내', us: '미국'}[i.market];
       const w = document.getElementById('busy-what'); if (w) w.textContent = (i.what || '실행') + (mk ? ' · ' + mk : '') + ' · ' + (i.min || 0) + '분째';
       const st = document.getElementById('busy-step'); if (st) st.textContent = i.step ? '지금: ' + i.step : '';
       const sl = document.getElementById('busy-stale'); if (sl && i.stale) sl.style.display = '';
     } catch (e) {}
-  }, 5000);
+  }
+  let t = setInterval(check, busy ? 5000 : 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (Date.now() - loadedAt > 10 * 60 * 1000) { location.reload(); return; }   // 오래 열어 둔 화면은 통째로 새로
+    check();
+  });
+  window.addEventListener('pageshow', e => { if (e.persisted) check(); });     // 뒤로 가기 캐시에서 돌아올 때
 })();
 </script>
 {% endblock %}

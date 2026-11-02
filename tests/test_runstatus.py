@@ -91,6 +91,42 @@ def test_web_busy_info_and_stop():
         fh.close()
 
 
+def test_failed_ai_run_is_recorded_and_last_judgement_kept():
+    cfg, br, ai, bot = tb.setup(decisions=[
+        {"code": "000001", "action": "BUY", "amount_krw": 40_000, "confidence": 0.9, "reason": "좋아요"}])
+    bot.run()
+    def boom(ctx):
+        raise RuntimeError("Gemini 응답 없음")
+    ai.decide = boom
+    bot.lines = []
+    bot.run()
+    runs = bot.j.runs_with_decisions(cfg.ledger, 15)
+    assert "AI 분석 실패" in runs[0]["market_view"] and not runs[0]["decisions"]
+    assert runs[1]["decisions"]                                   # 그 전 판단은 남아 있음
+    os.environ.update(TRADER_DATA_DIR=str(cfg.data_dir), WEB_PASSWORD="secret-pass")
+    import web.app as W
+    from flask import render_template
+    with W.app.test_request_context("/"):
+        from flask import session
+        session["ok"] = True
+        jm = __import__("jinja2")
+        tpl = W.app.jinja_env.from_string(
+            "{% from '_macros.html' import run_card %}{% set judged = runs|selectattr('decisions')|list %}"
+            "{{ runs[0].market_view }}|{{ judged[0].decisions[0].reason }}")
+        out = tpl.render(runs=runs)
+    assert "AI 분석 실패" in out and "좋아요" in out
+
+
+def test_index_has_refresh_and_autopoll():
+    os.environ.update(TRADER_DATA_DIR=tempfile.mkdtemp(), WEB_PASSWORD="secret-pass")
+    import web.app as W
+    cl = W.app.test_client()
+    with cl.session_transaction() as s:
+        s["ok"] = True
+    h = cl.get("/").get_data(as_text=True)
+    assert "새로고침" in h and "visibilitychange" in h and "최근 AI 판단" in h
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

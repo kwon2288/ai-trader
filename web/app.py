@@ -293,7 +293,7 @@ def index():
         snap=snap, stopped=stopped, halted=halted, busy=_busy_info(c), job=_job,
         next_run=fmt_kst(next_run(now) if m == "kr" else next_run_us(now)),
         chart=equity_svg(j.equity_series(c.ledger), c.total_krw),
-        runs=j.runs_with_decisions(c.ledger, 5), orders=j.orders(c.ledger, 10),
+        runs=j.runs_with_decisions(c.ledger, 15), orders=j.orders(c.ledger, 10),
         logs=j.logs(5), orders_today=j.orders_today(c.ledger),
         auto=universe.saved(j) if m == "kr" else None, today=now.strftime("%Y-%m-%d"),
     )

@@ -301,6 +301,7 @@ class Bot:
             self.say(f"🛑 봇 손익 {dd:.1f}% — 최대 손실 한도({cfg.max_drawdown_pct}%) 도달. 신규 매매를 멈춥니다.")
             self.notify("halt", f"🛑 {self._mk()} 최대 손실 한도 도달 — 봇 손익 {dd:.1f}% ({cfg.money(st['pnl'])}). "
                                 f"매매를 멈췄습니다. 확인 후 웹에서 ‘재개’하세요.")
+            self.j.finish_run(run_id, f"🛑 최대 손실 한도 도달 ({dd:.1f}%) — 매매 멈춤", {"_provider": "", "decisions": []})
             return self._out()
 
         self.orders_left = 0 if analyze_only else cfg.max_orders_per_day - self.j.orders_today(cfg.ledger)
@@ -427,6 +428,8 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             say_time()
             self.say(f"⚠ AI 분석 실패 — 이번 회차는 매매하지 않습니다: {e}")
+            self.j.finish_run(run_id, f"⚠ AI 분석 실패 — 매매 안 함: {str(e)[:300]}",
+                              {"_provider": getattr(self.analyst, "label", "AI"), "decisions": []})
             if not analyze_only:
                 self.notify("errors", f"⚠ {self._mk()} AI 분석 실패 — 이번 회차는 매매하지 않았습니다\n{e}")
             return self._out()

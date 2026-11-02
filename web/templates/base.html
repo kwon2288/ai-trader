@@ -95,6 +95,7 @@ details summary{cursor:pointer;color:var(--mute)}
   <a href="{{ url_for('pnl') }}" class="{{ 'on' if request.endpoint=='pnl' }}">손익</a>
   <a href="{{ url_for('history') }}" class="{{ 'on' if request.endpoint=='history' }}">기록</a>
   <a href="{{ url_for('settings') }}" class="{{ 'on' if request.endpoint=='settings' }}">설정</a>
+  <button type="button" title="새로고침" aria-label="새로고침" onclick="location.reload()" style="font-size:18px">↻</button>
   <form class="inline" method="post" action="{{ url_for('logout') }}"><button title="로그아웃">로그아웃</button></form>
 </nav>
 {% endif %}
