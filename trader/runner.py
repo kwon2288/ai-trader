@@ -93,8 +93,23 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
             from .bot import Bot
             led = cfg.ledger
             _an.USAGE_SINK = lambda p, m, ti, to: Journal(cfg.db_path).add_usage(led, p, m, ti, to, source)
-            bot = Bot(cfg, make_broker(cfg), make_analyst(cfg), j)
+            from . import pricing
+            ms = pricing.month_status(j, cfg.data_dir)
+            analyst = make_analyst(cfg)
+            note = None
+            if ms["over"] and getattr(analyst, "name", "") != "rules":
+                from .signals import RulesAnalyst
+                analyst = RulesAnalyst()
+                note = (f"💸 이번 달 AI 비용 ${ms['spend']:.2f} ≥ 월 한도 ${ms['limit']:g} → 이번 달은 AI 없이 규칙만으로 실행 "
+                        f"(사용량 화면에서 한도를 올리거나 0 으로 끄면 다시 AI 사용)")
+                from . import notify as _nt
+                if j.get("ai_limit_notified") != ms["month"]:
+                    j.set("ai_limit_notified", ms["month"])
+                    _nt.send(cfg, "errors", note)
+            bot = Bot(cfg, make_broker(cfg), analyst, j)
             out = bot.run(force=force, analyze_only=analyze_only)
+            if note:
+                out = note + "\n" + out
         except Exception as e:  # noqa: BLE001
             out = f"❌ 실행 오류: {e}"
             if not analyze_only:

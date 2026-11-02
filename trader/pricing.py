@@ -36,6 +36,7 @@ def settings(data_dir: Path) -> dict:
     d.setdefault("free", {"gemini": True})
     d.setdefault("credits", {})
     d.setdefault("budget", 5.0)
+    d.setdefault("monthly_limit", 0.0)      # 월 AI 사용 한도 ($, 0 = 없음) — 넘으면 그달은 규칙만으로 실행
     return d
 
 
@@ -100,3 +101,13 @@ def ai_cost(j, data_dir, ledger: str | None, start=None, end=None) -> dict:
         else:
             usd += c
     return {"usd": round(usd, 4), "calls": calls, "unknown": unknown}
+
+
+def month_status(j, data_dir) -> dict:
+    """이번 달(한국 날짜) AI 비용과 한도. {spend, limit, over, month}"""
+    from .journal import now
+    first = now().date().replace(day=1)
+    spend = ai_cost(j, data_dir, None, first)["usd"]
+    limit = float(settings(data_dir).get("monthly_limit") or 0)
+    return {"spend": round(spend, 4), "limit": limit, "over": bool(limit) and spend >= limit,
+            "month": first.strftime("%Y-%m")}

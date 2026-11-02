@@ -71,6 +71,7 @@ class Bot:
         self.orders_left = 0
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
         self.no_buy_reason = None
+        self.paused: set[str] = set()
         self.stages: list[tuple[str, float]] = []    # 단계별 걸린 시간 (실행 로그 끝에 표시)
         self._mark = None
 
@@ -218,7 +219,11 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             self.say(f"⚠ 체결 확인 중 오류: {e}")
         bal = self.broker.balance()
+        from . import corpaction
+        paused = corpaction.check(self.j, cfg, bal.holdings, self.say, self.notify) if cfg.mode != "dry" else set()
         held = own_holdings(self.j, cfg, bal.holdings)
+        for c in paused:
+            held.pop(c, None)
         from . import strategy
         sg = strategy.settings(cfg)
         full = dict(held)
@@ -290,8 +295,13 @@ class Bot:
                 if code not in bal.holdings:
                     self.j.close_position(code)
                     bot_codes.pop(code)
+        # 액면분할·병합: 봇 장부를 고치거나, 아직 반영 전이면 그 종목은 이번에 매매하지 않는다
+        from . import corpaction
+        self.paused = corpaction.check(self.j, cfg, bal.holdings, self.say, self.notify) if cfg.mode != "dry" else set()
         # 봇이 산 수량만 봇 몫으로 본다 — 같은 종목을 사용자가 따로 갖고 있어도 그 주식은 건드리지 않는다
         held = own_holdings(self.j, cfg, bal.holdings, self.say)
+        for c in self.paused:
+            held.pop(c, None)
         user_owned = {c for c in bal.holdings if c not in bot_codes}   # 사용자가 직접 가진 종목 → 매수 안 함
 
         from . import barcache
@@ -320,7 +330,7 @@ class Bot:
                 })
 
         self.stage("잔고")
-        collect(list(held) + cfg.symbols, "core")
+        collect([c for c in list(held) + cfg.symbols if c not in self.paused], "core")
         hit = self.bar_stats.get("hit", 0)
         self.stage(f"시세·일봉 {len(quotes)}종목" + (f"(일봉 캐시 {hit})" if hit else ""))
         if not quotes:
@@ -337,7 +347,7 @@ class Bot:
         if cfg.auto_count > 0:
             from . import universe
             auto = universe.ensure_today(cfg, self.broker, self.j, say=self.say)
-            collect([a["code"] for a in auto], "auto")
+            collect([a["code"] for a in auto if a["code"] not in self.paused], "auto")
             self.stage("자동 선정")
 
         # 2) 장부 / 손실 한도

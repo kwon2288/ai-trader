@@ -10,6 +10,11 @@
     {% for k, v in [('month','이번 달'),('30d','최근 30일'),('all','전체')] %}
     <a href="{{ url_for('usage', p=k) }}#summary" class="{{ 'on' if p == k }}">{{ v }}</a>{% endfor %}
   </div>
+  {% if ms.limit %}
+  <div class="flash" style="margin:0 0 10px;background:{{ 'var(--errbg)' if ms.over else ('var(--warnbg)' if ms.spend >= ms.limit * 0.8 else 'var(--okbg)') }};color:{{ 'var(--err)' if ms.over else ('var(--warn)' if ms.spend >= ms.limit * 0.8 else 'var(--ok)') }}">
+    이번 달 AI 비용 <b>${{ "%.2f"|format(ms.spend) }}</b> / 월 한도 ${{ "%g"|format(ms.limit) }}
+    {% if ms.over %}— 한도를 넘어 이번 달은 <b>규칙만으로</b> 실행 중이에요.{% elif ms.spend >= ms.limit * 0.8 %}— 한도의 80%를 넘었어요.{% endif %}</div>
+  {% endif %}
   <div class="stats">
     <div class="stat"><div class="k">비용</div><div class="v">{{ usd(summ.cost) }}</div>{{ krw(summ.cost) }}</div>
     <div class="stat"><div class="k">AI 호출</div><div class="v">{{ summ.calls }}회</div></div>
@@ -90,6 +95,8 @@
   <form method="post" action="{{ url_for('usage_settings') }}">
     <div class="grid2">
       <div><label for="budget">‘얼마나 쓸까’ 기준 금액 ($)</label><input id="budget" name="budget" value="{{ '%g'|format(st.budget) }}" inputmode="decimal"></div>
+      <div><label for="monthly_limit">월 AI 사용 한도 ($, 0 = 없음) — 넘으면 그달은 규칙만으로 실행</label>
+        <input id="monthly_limit" name="monthly_limit" value="{{ '%g'|format(st.monthly_limit or 0) }}" inputmode="decimal"></div>
       <div><label style="display:flex;gap:8px;align-items:center;margin-top:26px;color:var(--fg)">
         <input type="checkbox" name="free_gemini" style="width:auto" {{ 'checked' if st.free.get('gemini') }}> Gemini 무료 등급 사용 중 (비용 0)</label></div>
     </div>

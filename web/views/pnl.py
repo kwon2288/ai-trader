@@ -219,7 +219,7 @@ def usage():
                           "monthly": None if pr is None else (ti * pr[0] + to * pr[1]) / 1e6 * 30})
         choices.append({"key": key, "label": label, "prov": prov, "cur": cur, "opts": items,
                         "free": bool(st["free"].get(prov)), "basis": "실사용" if tok.get(prov) else "추정"})
-    return render_template("usage.html", c=c, p=p, summ=summ, proj=proj, st=st, days=days,
+    return render_template("usage.html", ms=pricing.month_status(j, c.data_dir), c=c, p=p, summ=summ, proj=proj, st=st, days=days,
                            choices=choices, providers=settings_io.PROVIDER_CHOICES,
                            keys={pv: available(pv) for pv in PROVIDERS},
                            models=[(m, pricing.price(m, st), m in st["prices"], m in pricing.PRICES,
@@ -266,6 +266,9 @@ def usage_settings():
     b = num("budget", 0.5, 1000)
     if b:
         st["budget"] = b
+    lim = num("monthly_limit", 0, 1000)
+    if lim is not None:
+        st["monthly_limit"] = lim
     st["free"] = {"gemini": bool(f.get("free_gemini"))}
     for prov in ("claude", "gemini", "openai"):
         amt, since = num(f"credit_{prov}", 0, 10000), (f.get(f"since_{prov}") or "").strip()
