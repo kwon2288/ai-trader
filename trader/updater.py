@@ -41,7 +41,7 @@ def check(data_dir: Path) -> dict:
     try:
         _git("fetch", "--quiet", "origin")
         head, remote = _git("rev-parse", "HEAD").strip(), _git("rev-parse", "origin/main").strip()
-        res["behind"] = int(_git("rev-list", "--count", f"HEAD..origin/main").strip() or 0)
+        res["behind"] = int(_git("rev-list", "--count", "HEAD..origin/main").strip() or 0)
         res["head"], res["remote"] = head[:7], remote[:7]
         if res["behind"]:
             init = _git("show", "origin/main:trader/__init__.py")

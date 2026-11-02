@@ -394,6 +394,11 @@ ai-trader/
 │   ├── runner.py          # 실행 잠금·증권사 선택 (명령줄·타이머·웹 공용)
 │   └── config.py
 ├── web/                   # Flask 웹 관리 화면
+│   ├── app.py             # 공통: 로그인·현황·기록·실행 버튼·실행 상태 (python -m web.app 로 시작)
+│   ├── views/             # 기능별 화면 — pnl(손익·사용량) · settings(설정·모드·연결 정보) · backup
+│   │                      #   notify(실행 시각·알림) · backtest(백테스트·전략) · passkey · update
+│   ├── settings_io.py     # config.toml 읽기·쓰기 (주석 유지)
+│   └── templates/
 ├── deploy/                # systemd 서비스·타이머, update.sh
 ├── tests/                 # 오프라인 테스트 (네트워크·키 불필요)
 └── data/                  # 실행 시 생성: journal.db, 로그, 토큰 캐시 (git 제외)
@@ -404,6 +409,7 @@ ai-trader/
 네트워크나 API 키 없이 가짜 증권사·가짜 AI 응답으로 규칙을 검증합니다.
 
 ```bash
+.venv/bin/python tests/run_all.py        # 전부 (파일별 통과 수 표시)
 .venv/bin/python tests/test_bot.py       # 위험관리 규칙 (예산·한도·손절·보유일·킬스위치 등)
 .venv/bin/python tests/test_analyst.py   # AI 응답 파싱·재시도·다수결
 .venv/bin/python tests/test_signals.py   # 규칙 신호·하이브리드(신호 없으면 AI 생략)·규칙만 모드

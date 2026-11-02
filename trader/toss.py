@@ -15,7 +15,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -121,15 +121,17 @@ class TossBroker:
     def _req(self, method: str, path: str, params: dict | None = None, body: dict | None = None,
              account: bool = False) -> dict | list:
         group = _group(method, path)
+        status = None                                      # 직전 시도의 HTTP 상태 (401 이면 토큰 재발급)
         for attempt in range(3):
             wait = INTERVAL.get(group, 0.2) - (time.monotonic() - self._last.get(group, 0))
             if wait > 0:
                 time.sleep(wait)
-            headers = {"Authorization": f"Bearer {self._get_token(force=attempt > 0 and r.status_code == 401)}"}
+            headers = {"Authorization": f"Bearer {self._get_token(force=status == 401)}"}
             if account:
                 headers["X-Tossinvest-Account"] = str(self.account_seq)
             r = self.session.request(method, BASE + path, params=params, json=body, headers=headers, timeout=20)
             self._last[group] = time.monotonic()
+            status = r.status_code
             if r.status_code == 401 and attempt == 0:
                 continue                                   # 토큰 무효 → 재발급 후 1회 재시도
             if r.status_code == 429 and attempt < 2:

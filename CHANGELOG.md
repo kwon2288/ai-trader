@@ -7,6 +7,15 @@
 
 ---
 
+## v0.18.2 — 2026-11-02
+
+### 코드 정리 (동작 변화 없음)
+- 1,600줄이던 `web/app.py` 를 기능별로 나눔 — 공통(로그인·현황·실행)은 `web/app.py`(약 420줄),
+  나머지는 `web/views/` 의 pnl · settings · backup · notify · backtest · passkey · update.
+  모든 주소·화면 링크 이름은 그대로 (분리 전후 경로 44개 동일 확인), 시작 방법(`python -m web.app`)도 그대로
+- 정적 검사(pyflakes)로 쓰지 않는 import·변수 정리, 토스 재시도 코드의 변수 사용 순서 명확히
+- `tests/run_all.py` — 테스트 전체를 한 번에 (23개 파일 · 120개)
+
 ## v0.18.1 — 2026-11-02
 
 ### 개선
