@@ -20,7 +20,7 @@ import requests
 
 log = logging.getLogger("notify")
 KINDS = {"orders": "주문 실행·실패", "errors": "실행 오류 (AI·증권사 연결 등)",
-         "halt": "최대 손실 한도로 정지", "daily": "하루 마감 요약 (그날 마지막 실행 후)"}
+         "halt": "최대 손실 한도로 정지", "daily": "하루 마감 요약 (장 마감 10분 뒤 · 국내 15:40, 미국 뉴욕 16:10)"}
 DEFAULTS = {"orders": True, "errors": True, "halt": True, "daily": False}
 TIMEOUT = 10
 

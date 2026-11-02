@@ -172,6 +172,12 @@ def _monitor_loop():
             raw = settings_io.read(CONFIG_PATH)
             j = Journal(c.db_path)
             monitor.check(j, c, raw, notify.send)
+            from trader.runner import close_summary
+            for mk in ["kr"] + (["us"] if c.us_enabled else []):
+                try:
+                    close_summary(c, mk)                  # 장 마감 10분 뒤 하루 요약 (하루 한 번)
+                except Exception as e:  # noqa: BLE001
+                    app.logger.warning("마감 요약 오류(%s): %s", mk, e)
             from trader import backup
             if datetime.now(KST).hour >= 18:           # 장 끝난 뒤 오늘 백업이 아직 없으면
                 backup.daily(j, c.data_dir, raw, warn=lambda m: notify.send(c, "errors", m))

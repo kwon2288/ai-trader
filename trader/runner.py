@@ -120,7 +120,6 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
         if not analyze_only and source == "timer":
             from . import monitor
             monitor.ping(cfg, ok=not out.startswith("❌"))
-            _daily_summary(cfg, j)
             try:                                        # 하루 한 번 매매 기록 백업
                 import tomllib
                 from . import backup
@@ -174,30 +173,41 @@ def run_watch(cfg: Config, market: str = "kr", source: str = "timer") -> str:
         lock.__exit__(None, None, None)
 
 
-def _daily_summary(cfg: Config, j: Journal) -> None:
-    """그날 마지막 정기 실행(설정한 자동 실행 시각 중 마지막) 뒤 하루 요약 알림. 하루 한 번만."""
+def close_summary(base: Config, market: str, at=None, force: bool = False) -> bool:
+    """장 마감 10분 뒤 하루 요약 알림 (국내 15:40, 미국 뉴욕 16:10 이후). 하루 한 번.
+    웹의 백그라운드 감시(5분마다)가 부른다. 그날 자동 실행 기록이 없으면(휴장일 등) 보내지 않는다.
+    보내기 전에 잔고를 새로 조회해 마감 가격으로 요약한다."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    from . import ledger, notify
+    from . import ledger, notify, pricing
+    from .bot import CLOSE
+    cfg = market_cfg(base, market)
     if not notify.enabled(cfg, "daily") or not notify.channels(cfg.data_dir):
-        return
-    tz = ZoneInfo("America/New_York" if cfg.market == "us" else "Asia/Seoul")
-    now = datetime.now(tz)
+        return False
+    tzname, hh, mm = CLOSE[market]
+    tz = ZoneInfo(tzname)
+    now = (at or datetime.now(tz)).astimezone(tz)
+    if not force and (now.weekday() >= 5 or (now.hour, now.minute) < (hh, mm + 10)):
+        return False
+    j = Journal(cfg.db_path)
     key = f"daily_sent_{cfg.ledger}"
-    from . import schedule
-    from .config import ensure_config
-    import tomllib
-    try:
-        last = schedule.as_tuples(schedule.times(tomllib.loads(ensure_config().read_text(encoding="utf-8")),
-                                                 cfg.market))[-1]
-    except Exception:  # noqa: BLE001
-        last = (14, 0)
-    if (now.hour, now.minute) < (last[0], max(0, last[1] - 5)) or j.get(key) == now.date().isoformat():
-        return
+    if not force and j.get(key) == now.date().isoformat():
+        return False
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    from .journal import KST
+    ran = j.db.execute("SELECT 1 FROM run_logs WHERE mode=? AND kind='trade' AND ts >= ? LIMIT 1",
+                       (cfg.ledger, start.astimezone(KST).isoformat(timespec="seconds"))).fetchone()
+    if not ran and not force:
+        return False
     j.set(key, now.date().isoformat())
+    try:
+        refresh_balance(base, market)                 # 마감 가격으로 다시 계산
+    except Exception:  # noqa: BLE001
+        pass
     snap = j.snapshot(cfg.ledger) or {}
     today = ledger.period(j, cfg.ledger, now.date(), now.date(), ledger.costs_of(cfg))
-    flag = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(cfg.market, "")
+    ai = pricing.ai_cost(j, cfg.data_dir, cfg.ledger, start.astimezone(KST).date())
+    flag = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(market, "")
     lines = [f"📊 {flag} 오늘 마감 요약 ({now:%m/%d})",
              f"오늘 주문: 매수 {today['buys']}건 · 매도 {today['n']}건",
              f"오늘 실현 손익: {cfg.money(today['pnl'])}"]
@@ -206,7 +216,10 @@ def _daily_summary(cfg: Config, j: Journal) -> None:
         lines.append(f"투자 중: {cfg.money(snap['invested'])} / 예산 {cfg.money(snap['budget'])}")
     for p in snap.get("positions", [])[:5]:
         lines.append(f" · {p['name']} {p['qty']}주 {p['pnl_pct']:+.1f}%")
+    if ai["calls"]:
+        lines.append(f"AI: {ai['calls']}회 · ${ai['usd']:.3f}")
     notify.send(cfg, "daily", "\n".join(lines))
+    return True
 
 
 def refresh_balance(cfg: Config, market: str = "kr") -> dict:

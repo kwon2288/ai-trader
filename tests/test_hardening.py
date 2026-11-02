@@ -156,6 +156,31 @@ def test_watch_cancels_before_close():
     assert (datetime.now(cut.tzinfo) - cut).total_seconds() < 6 * 60       # 5분 넘은 주문은 모두 취소 대상
 
 
+def test_close_summary():
+    from trader import notify, runner
+    d = tempfile.mkdtemp()
+    cfg = tb.make_cfg(Path(d))
+    sent = []
+    o_en, o_ch, o_send, o_rb = notify.enabled, notify.channels, notify.send, runner.refresh_balance
+    notify.enabled = lambda c, k: True
+    notify.channels = lambda dd: ["telegram"]
+    notify.send = lambda c, k, t, force=False: sent.append(t)
+    runner.refresh_balance = lambda base, mk: {}
+    kst = ZoneInfo("Asia/Seoul")
+    try:
+        j = Journal(cfg.db_path)
+        assert not runner.close_summary(cfg, "kr", datetime(2026, 11, 3, 15, 45, tzinfo=kst))   # 오늘 실행 없음(휴장 등)
+        j.add_log(cfg.ledger, "trade", "timer", "x")
+        today = datetime.now(kst)
+        assert not runner.close_summary(cfg, "kr", today.replace(hour=15, minute=20))           # 마감 전
+        if today.weekday() < 5:
+            assert runner.close_summary(cfg, "kr", today.replace(hour=15, minute=45))
+            assert not runner.close_summary(cfg, "kr", today.replace(hour=16, minute=0))        # 하루 한 번
+            assert "🇰🇷 국내 오늘 마감 요약" in sent[0]
+    finally:
+        notify.enabled, notify.channels, notify.send, runner.refresh_balance = o_en, o_ch, o_send, o_rb
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
