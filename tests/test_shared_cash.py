@@ -56,6 +56,21 @@ def test_split_when_cash_short():
     assert st["avail"] == round(240_000 * 200_000 / 270_000)
 
 
+def test_priority_options():
+    kr, us = cfgs()
+    j = Journal(kr.db_path)
+    j.set("fx_usdkrw", "1400")
+    # 국내 남은 20만원, 미국 남은 28만원, 현금 24만원
+    kr.us["shared_priority"] = "kr"
+    assert ledger.status(j, kr, {}, 240_000)["avail"] == 200_000               # 국내 우선: 국내 예산 다 채움
+    assert abs(ledger.status(j, kr.for_market("us"), {}, 240_000 / 1400)["avail"] - 40_000 / 1400) < 0.05   # 미국은 남는 4만원
+    kr.us["shared_priority"] = "us"
+    assert ledger.status(j, kr, {}, 240_000)["avail"] == 0                      # 미국 우선: 미국 28만원 > 현금 → 국내 0
+    assert abs(ledger.status(j, kr.for_market("us"), {}, 240_000 / 1400)["avail"] - 240_000 / 1400) < 0.05
+    kr.us["shared_priority"] = "weird"
+    assert ledger.priority(kr) == "split"
+
+
 def test_bot_says_split():
     for k in ("BROKER", "BROKER_US", "NHPLUG_ACCOUNT", "NHPLUG_ACCOUNT_US"):
         os.environ.pop(k, None)

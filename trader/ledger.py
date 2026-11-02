@@ -164,11 +164,27 @@ def shared_split(j, cfg, room: float, acash: float) -> dict | None:
         return {"cap": acash, "other_room": None, "pct": None, "short": False, "fx": None}
     o_conv = o_room * fx if cfg.market == "kr" else o_room / fx
     total = room + o_conv
+    prio = priority(cfg)
+    base = {"other_room": round(o_conv, 2), "fx": fx, "priority": prio}
     if total <= 0 or acash >= total:
-        return {"cap": acash, "other_room": round(o_conv, 2), "pct": None, "short": False, "fx": fx}
-    pct = room / total
-    return {"cap": round(acash * pct, 2), "other_room": round(o_conv, 2), "pct": round(pct * 100),
-            "short": True, "fx": fx}
+        return {"cap": acash, "pct": None, "short": False, **base}
+    if prio == cfg.market:                       # 이 시장 우선: 남은 예산만큼 먼저 씀
+        cap = min(room, acash)
+    elif prio in ("kr", "us"):                   # 다른 시장 우선: 그 시장 남은 예산을 먼저 떼어 둠
+        cap = max(0.0, acash - o_conv)
+    else:                                        # 균등(비율): 남은 예산 비율대로
+        cap = acash * room / total
+    pct = round(cap / acash * 100) if acash else 0
+    return {"cap": round(cap, 2), "pct": pct, "short": True, **base}
+
+
+PRIORITIES = {"split": "남은 예산 비율대로", "kr": "국내 우선", "us": "미국 우선"}
+
+
+def priority(cfg) -> str:
+    """config [us] shared_priority = "split"(기본) | "kr" | "us"."""
+    v = str((getattr(cfg, "us", None) or {}).get("shared_priority", "split")).strip().lower()
+    return v if v in PRIORITIES else "split"
 
 
 def period(j, ledger: str, start: date | None, end: date | None, costs: dict | None = None) -> dict:

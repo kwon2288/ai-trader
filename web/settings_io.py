@@ -159,6 +159,9 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
         us_values[(sec, key)] = v
     if not errors and us_values[("us", "max_per_position_usd")] > us_values[("us", "total_usd")]:
         errors.append("미국 종목당 최대 금액이 미국 원금보다 클 수 없습니다")
+    us_prio = form.get("us_shared_priority", "split")
+    if us_prio not in ("split", "kr", "us"):
+        errors.append("같은 계좌 현금 나누기 방식이 올바르지 않습니다")
     us_margin = form.get("us_margin_currency", "krw")
     if us_margin not in ("krw", "usd"):
         errors.append("미국 증거금 통화가 올바르지 않습니다")
@@ -192,6 +195,7 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     for (sec, key), v in us_values.items():
         text = _set(text, sec, key, v)
     text = _set(text, "us", "margin_currency", us_margin)
+    text = _set(text, "us", "shared_priority", us_prio)
     text = _set_symbols(text, us_symbols, "us")
     tomllib.loads(text)  # 깨진 파일은 저장하지 않음
     tmp = path.with_suffix(".toml.tmp")

@@ -61,7 +61,7 @@
     {% if short > 0 %}· <span>■</span> 계좌 현금 부족으로 못 씀 {{ money(short, cur) }}{% endif %}</div>
   {% set sh = snap.shared %}
   {% if sh %}
-  <div class="mute" style="margin-top:6px">🔗 국내·미국 <b>같은 계좌</b> (증거금 공유) — 계좌 주문가능 현금 {{ money(snap.account_cash, cur) }}{% if sh.short %}이 두 시장 남은 예산 합계보다 적어 <b>남은 예산 비율대로</b> 나눠 써요:
+  <div class="mute" style="margin-top:6px">🔗 국내·미국 <b>같은 계좌</b> (증거금 공유) — 계좌 주문가능 현금 {{ money(snap.account_cash, cur) }}{% if sh.short %}이 두 시장 남은 예산 합계보다 적어 <b>{{ {'split':'남은 예산 비율대로','kr':'국내 우선으로','us':'미국 우선으로'}.get(sh.priority, '남은 예산 비율대로') }}</b> 나눠 써요:
     이 시장 {{ sh.pct }}% ({{ money(sh.cap, cur) }}) · {{ '미국' if market == 'kr' else '국내' }} {{ 100 - sh.pct }}%
 {% elif sh.fx %}로 두 시장 남은 예산({{ '미국' if market == 'kr' else '국내' }} 몫 {{ money(sh.other_room, cur) }} 환산)을 모두 감당할 수 있어요.
 {% else %} — 환율을 아직 몰라 나누지 않았어요 (미국 실행·잔고 새로고침 한 번 뒤부터).{% endif %}</div>

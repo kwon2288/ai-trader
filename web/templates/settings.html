@@ -100,6 +100,13 @@
         <option value="krw" {{ 'selected' if us.margin_currency == 'krw' }}>원화로 바로 주문 (환전 불필요)</option>
         <option value="usd" {{ 'selected' if us.margin_currency == 'usd' }}>달러 예수금 사용</option>
       </select></div>
+    <div><label for="us_shared_priority">국내·미국 같은 계좌일 때 현금이 모자라면</label>
+      <select id="us_shared_priority" name="us_shared_priority">
+        {% set sp = us.shared_priority or 'split' %}
+        <option value="split" {{ 'selected' if sp == 'split' }}>균등 — 남은 예산 비율대로 나눔</option>
+        <option value="kr" {{ 'selected' if sp == 'kr' }}>국내 우선 — 국내 예산부터 채우고 남는 만큼 미국</option>
+        <option value="us" {{ 'selected' if sp == 'us' }}>미국 우선 — 미국 예산부터 채우고 남는 만큼 국내</option>
+      </select></div>
   </div>
   <label for="us_symbols">미국 종목 — 티커, 쉼표나 줄바꿈으로 구분 (최대 40개)</label>
   <textarea id="us_symbols" name="us_symbols" rows="4">{{ us.symbols|join(', ') }}</textarea>
