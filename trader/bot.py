@@ -279,6 +279,8 @@ class Bot:
             if c in quotes:
                 h.now_price = quotes[c].price
         from . import ledger
+        if getattr(self.broker, "fx", 0):                  # 같은 계좌 현금을 국내·미국이 나눠 쓸 때 환산용
+            self.j.set("fx_usdkrw", str(self.broker.fx))
         st = ledger.status(self.j, cfg, held, bal.orderable_cash)
         self.avail = st["avail"]
         equity, dd = st["equity"], st["pnl_pct"]
@@ -286,7 +288,16 @@ class Bot:
                  f" · 지금 살 수 있음 {cfg.money(st['avail'])}"
                  f" | 봇 손익 {cfg.money(st['pnl'])} ({dd:+.2f}%: 실현 {cfg.money(st['realized'])}"
                  f" · 평가 {cfg.money(st['unrealized'])})")
-        if cfg.mode != "dry" and st["account_cash"] is not None and st["account_cash"] < st["room"]:
+        sh = st.get("shared")
+        if sh and sh.get("short"):
+            other = "미국" if cfg.market == "kr" else "국내"
+            self.say(f"🔗 국내·미국 같은 계좌: 주문가능 현금 {cfg.money(st['account_cash'])}이 두 시장 남은 예산 합계보다 적어"
+                     f" 남은 예산 비율대로 나눠요 → 이 시장 {sh['pct']}% ({cfg.money(sh['cap'])}),"
+                     f" {other} 몫 {100 - sh['pct']}% 남겨 둠")
+        elif sh and sh.get("fx") is None:
+            self.say("🔗 국내·미국 같은 계좌지만 아직 환율을 몰라 현금을 나누지 않았어요 (미국 실행 한 번 뒤부터 적용)")
+        if cfg.mode != "dry" and st["account_cash"] is not None and st["account_cash"] < st["room"] \
+                and not (sh and sh.get("short")):
             self.say(f"⚠ 계좌 주문가능 현금 {cfg.money(st['account_cash'])} < 남은 예산 {cfg.money(st['room'])}"
                      f" → {cfg.money(st['avail'])}까지만 매수합니다")
         run_id = self.j.start_run(cfg.ledger, equity)

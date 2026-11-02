@@ -58,6 +58,7 @@ class Config:
     mode: str = "dry"
     mode_source: str = "env"          # env=.env 의 TRADING_MODE, web=웹에서 바꿈(data/mode.json)
     live_ack: bool = False            # 웹에서 실계좌 전환 확인을 거쳤는지
+    kr_base: "Config | None" = field(default=None, repr=False, compare=False)   # 미국 설정에서 국내 설정으로 돌아갈 때
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
 
     @property
@@ -81,7 +82,7 @@ class Config:
     def for_market(self, market: str) -> "Config":
         """시장별 설정. 위험관리 비율(손절·익절·확신도 등)은 공유하고 예산·종목만 바꾼다."""
         if market == "kr":
-            return self
+            return self.kr_base or self
         if market != "us":
             raise ValueError(f"알 수 없는 시장: {market} (kr/us)")
         u = self.us
@@ -94,6 +95,7 @@ class Config:
             order_type=u.get("order_type", "limit"),
             symbols=[norm_symbol(x, "us") for x in u.get("symbols", [])],
             auto_count=0,                                            # 미국 자동 선정은 아직 미지원
+            kr_base=self.kr_base or self,
         )
 
     def money(self, v) -> str:

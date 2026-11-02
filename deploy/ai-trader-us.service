@@ -7,4 +7,4 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/ai-trader
 ExecStart=/opt/ai-trader/.venv/bin/python run.py trade --market us
-TimeoutStartSec=900
+TimeoutStartSec=1200

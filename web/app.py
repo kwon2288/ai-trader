@@ -294,7 +294,8 @@ def index():
         next_run=fmt_kst(next_run(now) if m == "kr" else next_run_us(now)),
         chart=equity_svg(j.equity_series(c.ledger), c.total_krw),
         runs=j.runs_with_decisions(c.ledger, 15), orders=j.orders(c.ledger, 10),
-        logs=j.logs(5), orders_today=j.orders_today(c.ledger),
+        logs=[l for l in j.logs(40) if l.get("mode") in (c.ledger, None, "") or l.get("kind") in ("update", "mode", "env")][:8], last_log_id=(j.logs(1) or [{}])[0].get("id"),
+        orders_today=j.orders_today(c.ledger),
         auto=universe.saved(j) if m == "kr" else None, today=now.strftime("%Y-%m-%d"),
     )
 

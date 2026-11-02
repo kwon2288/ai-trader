@@ -90,6 +90,11 @@ def status(j, cfg, held: dict, account_cash: float | None) -> dict:
     room = max(0.0, sat_budget - (invested - core_inv))
     acash = None if account_cash is None or account_cash == float("inf") else float(account_cash)
     avail = room if (cfg.mode == "dry" or acash is None) else min(room, acash)
+    shared = None
+    if cfg.mode != "dry" and acash is not None:
+        shared = shared_split(j, cfg, room, acash)
+        if shared:
+            avail = min(avail, shared["cap"])
     r = 2 if cfg.currency == "USD" else 0
 
     def rd(x):
@@ -100,7 +105,70 @@ def status(j, cfg, held: dict, account_cash: float | None) -> dict:
             "room": rd(room), "avail": rd(avail), "account_cash": None if acash is None else rd(acash),
             "positions": len(held), "core_pct": sg["core_pct"], "core_code": sg["core_code"] if sg["core_pct"] else None,
             "core_budget": rd(core_budget), "core_invested": rd(core_inv),
-            "core_value": rd(core.qty * core.now_price) if core else 0, "sat_budget": rd(sat_budget)}
+            "core_value": rd(core.qty * core.now_price) if core else 0, "sat_budget": rd(sat_budget),
+            "shared": shared}
+
+
+# ── 국내·미국 같은 계좌(증거금 공유) ────────────────────────────
+def shared_account(cfg) -> bool:
+    """국내·미국이 같은 계좌의 현금(원화 증거금)을 같이 쓰는지.
+    config [us] shared_cash = "auto"(기본) | true | false.
+    auto: 둘 다 NH 이고, 미국 계좌를 따로 지정하지 않았거나 같은 번호이고, 미국을 원화 증거금으로 살 때."""
+    import os
+    us = getattr(cfg, "us", None) or {}
+    v = us.get("shared_cash", "auto")
+    if isinstance(v, bool):
+        return v and cfg.us_enabled
+    v = str(v).strip().lower()
+    if v in ("true", "on", "yes", "1"):
+        return cfg.us_enabled
+    if v in ("false", "off", "no", "0") or not cfg.us_enabled:
+        return False
+    from .runner import broker_name
+    if broker_name(cfg.for_market("kr")) != "nh" or broker_name(cfg.for_market("us")) != "nh":
+        return False
+    a_kr = os.environ.get("NHPLUG_ACCOUNT", "").strip()
+    a_us = os.environ.get("NHPLUG_ACCOUNT_US", "").strip()
+    if a_us and a_kr and a_us != a_kr:
+        return False
+    return str(us.get("margin_currency", "krw")).strip().lower() == "krw"
+
+
+def _room_from_journal(j, cfg) -> float:
+    """다른 시장의 남은 예산 (봇 장부만으로 — 시세 조회 없이 매입금액 기준)."""
+    from . import strategy
+    sg = strategy.settings(cfg)
+    lots = j.bot_lots(cfg.market, cfg.ledger)
+    invested = core_inv = 0.0
+    for code, (qty, avg) in lots.items():
+        v = (qty or 0) * (avg or 0)
+        invested += v
+        if sg["core_pct"] and code == sg["core_code"]:
+            core_inv += v
+    sat = float(cfg.total_krw) * (1 - sg["core_pct"] / 100)
+    return max(0.0, sat - (invested - core_inv))
+
+
+def shared_split(j, cfg, room: float, acash: float) -> dict | None:
+    """같은 계좌면 주문가능 현금을 두 시장의 남은 예산 비율로 나눈다 (현금이 넉넉하면 나누지 않음).
+    반환: {cap(이 시장 통화), other_room(이 시장 통화), pct(이 시장 몫 %), short(현금 부족 여부), fx} 또는 None."""
+    try:
+        if not shared_account(cfg):
+            return None
+        fx = float(j.get("fx_usdkrw") or 0)
+        other = "us" if cfg.market == "kr" else "kr"
+        o_room = _room_from_journal(j, cfg.for_market(other))
+    except Exception:  # noqa: BLE001
+        return None
+    if not fx:
+        return {"cap": acash, "other_room": None, "pct": None, "short": False, "fx": None}
+    o_conv = o_room * fx if cfg.market == "kr" else o_room / fx
+    total = room + o_conv
+    if total <= 0 or acash >= total:
+        return {"cap": acash, "other_room": round(o_conv, 2), "pct": None, "short": False, "fx": fx}
+    pct = room / total
+    return {"cap": round(acash * pct, 2), "other_room": round(o_conv, 2), "pct": round(pct * 100),
+            "short": True, "fx": fx}
 
 
 def period(j, ledger: str, start: date | None, end: date | None, costs: dict | None = None) -> dict:

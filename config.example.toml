@@ -81,6 +81,8 @@ max_positions = 2
 max_orders_per_day = 4
 order_type = "limit"          # 미국은 지정가 권장 (호가 기준)
 margin_currency = "krw"       # NH: krw = 원화로 바로 주문(환전 불필요), usd = 달러 예수금 사용
+shared_cash = "auto"          # 국내·미국이 같은 계좌 현금(증거금)을 같이 쓰면, 모자랄 때 두 시장 남은 예산 비율로 나눔
+                              # auto = NH 같은 계좌 + 원화 증거금이면 켬 · true · false
 symbols = [
   "SPLG",   # SPDR S&P500 (저가형)
   "SCHD",   # 미국 배당

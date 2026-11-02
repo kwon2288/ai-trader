@@ -203,6 +203,8 @@ def refresh_balance(cfg: Config, market: str = "kr") -> dict:
     from . import ledger
     from .bot import account_view, own_holdings
     held = own_holdings(j, cfg, bal.holdings)
+    if getattr(broker, "fx", 0):
+        j.set("fx_usdkrw", str(broker.fx))
     st = ledger.status(j, cfg, held, bal.orderable_cash)
     snap = {
         **st,

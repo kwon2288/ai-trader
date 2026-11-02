@@ -146,14 +146,33 @@ def main() -> None:
         return
 
     if args.cmd in ("analyze", "trade"):
-        if args.cmd == "trade":
-            guard_live(cfg)
-        try:
-            print(run_cycle(cfg, analyze_only=(args.cmd == "analyze"), force=args.force,
-                            source="timer" if os.environ.get("INVOCATION_ID") else "cli", market=args.market))
-        except Busy as e:
-            sys.exit(str(e))
-        return
+        import time as _t
+        from trader.journal import Journal
+        from trader.runner import live_allowed
+        source = "timer" if os.environ.get("INVOCATION_ID") else "cli"
+        kind = "analyze" if args.cmd == "analyze" else "trade"
+        mcfg = cfg.for_market(args.market) if args.market != "kr" else cfg
+        if args.cmd == "trade" and not live_allowed(cfg):
+            msg = ("⛔ 실계좌 모드지만 실행 허가가 없어 건너뜀 — 웹 설정 → 실행 모드에서 확인 절차로 전환하거나 "
+                   ".env 에 I_UNDERSTAND_REAL_MONEY=yes")
+            Journal(cfg.db_path).add_log(mcfg.ledger, kind, source, msg)
+            sys.exit(msg)
+        # 다른 실행(장중 감시·웹 작업 등)이 잡고 있으면 최대 5분까지 기다렸다가 실행 — 그래도 안 되면 기록에 남기고 건너뜀
+        deadline = _t.time() + (300 if source == "timer" else 0)
+        while True:
+            try:
+                print(run_cycle(cfg, analyze_only=(args.cmd == "analyze"), force=args.force,
+                                source=source, market=args.market))
+                return
+            except Busy as e:
+                if _t.time() >= deadline:
+                    from trader import runstatus
+                    st = runstatus.read(cfg.data_dir)
+                    who = st.get("what") if st and not st.get("done") else "다른 작업"
+                    msg = f"⏭ {who} 실행 중이라 이번 회차를 건너뜀 ({e})"
+                    Journal(cfg.db_path).add_log(mcfg.ledger, kind, source, msg)
+                    sys.exit(msg)
+                _t.sleep(15)
 
     try:
         cfg = market_cfg(cfg, args.market)
