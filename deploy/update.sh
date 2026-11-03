@@ -23,7 +23,19 @@ for f in deploy/*.service deploy/*.timer; do
     cp "$f" "$dst" && echo "  · $(basename "$f") 갱신" && reload=1
   fi
 done
+# 미국 자동 실행만 설치돼 있고 국내가 빠졌으면 국내도 설치 (둘 다 쓰는 게 기본)
+if [ -f /etc/systemd/system/ai-trader-us.timer ] && [ ! -f /etc/systemd/system/ai-trader.timer ]; then
+  cp deploy/ai-trader.service deploy/ai-trader.timer /etc/systemd/system/ && echo "  · 국내 자동 실행 타이머 설치" && reload=1
+fi
 [ "$reload" = 1 ] && systemctl daemon-reload
+# 설치된 자동 실행 타이머가 꺼져 있으면 켬 (재부팅 후 안 켜지는 경우 등)
+for t in ai-trader.timer ai-trader-us.timer; do
+  if [ -f "/etc/systemd/system/$t" ] && ! systemctl is-enabled --quiet "$t"; then
+    systemctl enable --now "$t" && echo "  · $t 켬"
+  elif [ -f "/etc/systemd/system/$t" ] && ! systemctl is-active --quiet "$t"; then
+    systemctl start "$t" && echo "  · $t 시작"
+  fi
+done
 # 장중 감시 타이머: 자동 실행을 설치해 둔 서버면 설정(watch_minutes)대로 처음 한 번 설치
 if [ -f /etc/systemd/system/ai-trader.timer ] && [ ! -f /etc/systemd/system/ai-trader-watch-kr.timer ]; then
   .venv/bin/python run.py timers || true

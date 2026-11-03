@@ -16,9 +16,18 @@
     {% if busy %}<span class="badge {{ 'b-err' if busy.stale else 'b-warn' }}" id="busy">⏳ <span id="busy-what">{{ busy.what }}{{ ' · ' ~ {'kr':'국내','us':'미국'}.get(busy.market, '') if busy.market }} · {{ busy.min }}분째</span></span>
     {% elif halted %}<span class="badge b-err">🛑 손실 한도로 정지</span>
     {% elif stopped %}<span class="badge b-warn">⏸ 정지됨</span>
+    {% elif timer.state in ('missing', 'inactive') %}<span class="badge b-err">⚠ 자동 실행 꺼짐</span>
     {% else %}<span class="badge b-ok">● 자동 실행 대기</span>{% endif %}
     {% if missed %}<span class="badge b-err">⏰ 오늘 {{ missed|join(', ') }} 실행 누락{% if market == 'us' %} (뉴욕){% endif %}</span>{% endif %}
   </div>
+  {% if timer.state in ('missing', 'inactive') %}
+  <div class="flash" style="margin:8px 0 0;background:var(--errbg);color:var(--err)">
+    {{ '국내' if market == 'kr' else '미국' }} 자동 실행 타이머가 {{ '설치돼 있지 않아요' if timer.state == 'missing' else '꺼져 있어요' }} —
+    정해진 시각에 매매·분석이 돌지 않아요 (장중 감시는 따로).
+    <form method="post" action="{{ url_for('schedule_enable') }}" class="inline" style="margin-left:6px">
+      <input type="hidden" name="market" value="{{ market }}">
+      <button class="btn" style="padding:4px 10px;font-size:13px">▶ 자동 실행 켜기</button></form></div>
+  {% endif %}
   {% if busy %}
   <div class="mute" style="margin-top:6px" id="busy-step">{% if busy.step %}지금: {{ busy.step }}{% endif %}</div>
   <div id="busy-stale" class="flash" style="margin:8px 0 0;background:var(--errbg);color:var(--err);{{ '' if busy.stale else 'display:none' }}">

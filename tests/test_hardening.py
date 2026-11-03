@@ -181,6 +181,45 @@ def test_close_summary():
         notify.enabled, notify.channels, notify.send, runner.refresh_balance = o_en, o_ch, o_send, o_rb
 
 
+def test_timer_state_and_enable_route():
+    from trader import schedule
+    import subprocess
+    calls = []
+
+    class R:
+        def __init__(self, out=""):
+            self.stdout = out
+    state = {"load": "not-found"}
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[1] == "show":
+            return R(f"LoadState={state['load']}\nActiveState={'active' if state['load'] == 'loaded' else 'inactive'}\n"
+                     "NextElapseUSecRealtime=Tue 2026-11-03 14:30:00 KST")
+        if cmd[1] == "enable":
+            state["load"] = "loaded"
+        return R()
+    o_run, o_which, o_sys = subprocess.run, schedule.shutil.which, schedule.SYSTEMD
+    schedule.subprocess.run = fake_run
+    schedule.shutil.which = lambda x: "/bin/systemctl"
+    schedule.SYSTEMD = Path(tempfile.mkdtemp())
+    try:
+        assert schedule.timer_state("kr")["state"] == "missing"
+        W = web()
+        cl = W.app.test_client()
+        with cl.session_transaction() as s:
+            s["ok"] = True
+        h = cl.get("/").get_data(as_text=True)
+        assert "자동 실행 꺼짐" in h and "자동 실행 켜기" in h
+        cl.post("/schedule/enable", data={"market": "kr"})
+        assert (schedule.SYSTEMD / "ai-trader.timer").exists() and (schedule.SYSTEMD / "ai-trader.service").exists()
+        assert ["systemctl", "enable", "--now", "ai-trader.timer"] in calls
+        assert schedule.timer_state("kr")["state"] == "active"
+        assert "자동 실행 꺼짐" not in cl.get("/").get_data(as_text=True)
+    finally:
+        schedule.subprocess.run, schedule.shutil.which, schedule.SYSTEMD = o_run, o_which, o_sys
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

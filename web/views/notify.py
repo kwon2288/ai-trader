@@ -56,6 +56,21 @@ def schedule_save():
     return redirect(url_for("settings") + "#schedule")
 
 
+@app.post("/schedule/enable")
+@login_required
+def schedule_enable():
+    """꺼져 있거나 설치 안 된 자동 실행 타이머를 켠다."""
+    from trader import schedule
+    mk = request.form.get("market", "kr")
+    if mk not in ("kr", "us"):
+        mk = "kr"
+    msg = schedule.enable_timer(mk, schedule.times(settings_io.read(webapp.CONFIG_PATH), mk))
+    c = webapp.cfg()
+    Journal(c.db_path).add_log(c.for_market(mk).ledger, "schedule", "web", msg)
+    flash(msg, "err" if "실패" in msg or "없어" in msg else "ok")
+    return redirect(request.referrer or url_for("index"))
+
+
 @app.post("/notify/save")
 @login_required
 def notify_save():

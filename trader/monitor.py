@@ -20,7 +20,9 @@ GRACE_MIN = 15
 
 
 def timer_installed(market: str) -> bool:
-    return (schedule.SYSTEMD / schedule.TIMER[market]).exists()
+    if (schedule.SYSTEMD / schedule.TIMER[market]).exists():
+        return True
+    return schedule.timer_state(market)["state"] in ("active", "inactive")     # 다른 위치에 설치된 경우
 
 
 def missed_slots(j, cfg, raw: dict, market: str, now: datetime | None = None) -> list[str]:

@@ -308,12 +308,15 @@ def index():
     now = datetime.now(KST)
     from trader import monitor
     from trader.runner import broker_name
+    from trader import schedule as _sch
+    timer = _sch.timer_state(m)
     try:
-        missed = monitor.missed_slots(j, base, settings_io.read(CONFIG_PATH), m) if monitor.timer_installed(m) else []
+        missed = monitor.missed_slots(j, base, settings_io.read(CONFIG_PATH), m) \
+            if timer["state"] in ("active", "inactive") or (timer["state"] == "unknown" and monitor.timer_installed(m)) else []
     except Exception:  # noqa: BLE001
         missed = []
     return render_template(
-        "index.html", c=c, base=base, market=m, broker=broker_name(c), missed=missed,
+        "index.html", c=c, base=base, market=m, broker=broker_name(c), missed=missed, timer=timer,
         watch_last=(j.get(f"watch_last_{c.ledger}") or "")[11:16],
         snap=snap, stopped=stopped, halted=halted, busy=_busy_info(c), job=_job,
         next_run=fmt_kst(next_run(now) if m == "kr" else next_run_us(now)),

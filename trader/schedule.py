@@ -77,6 +77,46 @@ def apply(market: str, ts: list[str]) -> str:
     return f"{timer} 에 적용했어요"
 
 
+SERVICE = {"kr": "ai-trader.service", "us": "ai-trader-us.service"}
+
+
+def timer_state(market: str) -> dict:
+    """자동 실행 타이머 상태 — {"state": active|inactive|missing|unknown, "next": "MM-DD HH:MM" 또는 None}.
+    파일 위치와 상관없이 systemd 에 실제로 등록·실행 중인지 본다."""
+    if not shutil.which("systemctl"):
+        return {"state": "unknown", "next": None}
+    try:
+        r = subprocess.run(["systemctl", "show", TIMER[market], "-p", "LoadState", "-p", "ActiveState",
+                            "-p", "NextElapseUSecRealtime"], capture_output=True, text=True, timeout=10)
+        kv = dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+    except Exception:  # noqa: BLE001
+        return {"state": "unknown", "next": None}
+    if kv.get("LoadState") != "loaded":
+        return {"state": "missing", "next": None}
+    nxt = kv.get("NextElapseUSecRealtime") or None
+    return {"state": "active" if kv.get("ActiveState") == "active" else "inactive", "next": nxt}
+
+
+def enable_timer(market: str, ts: list[str]) -> str:
+    """자동 실행 타이머 설치(없으면 deploy/ 에서 복사)·켜기·시각 적용. 반환: 결과 메시지 (예외 없음)."""
+    from .config import ROOT
+    if not shutil.which("systemctl") or not SYSTEMD.exists():
+        return "systemctl 이 없어 켤 수 없어요 (서버에서 직접 설치하세요)"
+    try:
+        for f in (SERVICE[market], TIMER[market]):
+            src, dst = ROOT / "deploy" / f, SYSTEMD / f
+            if src.exists() and not dst.exists():
+                shutil.copy(src, dst)
+        subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=30)
+        subprocess.run(["systemctl", "enable", "--now", TIMER[market]], check=True, timeout=30)
+    except Exception as e:  # noqa: BLE001
+        return f"자동 실행 켜기 실패: {e}"
+    msg = apply(market, ts)
+    st = timer_state(market)
+    return f"{'국내' if market == 'kr' else '미국'} 자동 실행을 켰어요 ({msg})" + (
+        "" if st["state"] == "active" else f" — 그런데 상태가 {st['state']} 예요. 서버에서 확인이 필요해요")
+
+
 # ── 장중 감시 (AI 없이 손절·익절만) ─────────────────────────
 WATCH_CHOICES = (0, 10, 15, 20, 30)          # 분 (0 = 끄기)
 WATCH_TIMER = {"kr": "ai-trader-watch-kr.timer", "us": "ai-trader-watch-us.timer"}
