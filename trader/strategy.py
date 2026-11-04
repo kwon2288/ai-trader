@@ -7,6 +7,10 @@ config [strategy]
   core_us = "SPYM"        # 미국 코어 ETF (S&P 500)
   signal = "trend"        # 매매 신호: trend(추세 추종) · dip(눌림목 반등) · breakout(신고가 돌파) · volume(거래량 급증)
   max_hold_days = 0       # 이 날수가 지나면 수익·손실과 상관없이 정리 (단기 매매용, 0 = 끔)
+  rule_sell = "direct"    # 규칙 매도 신호: direct(AI 확인 없이 바로 매도) · ai(AI 가 확인)
+
+config [strategy.kr] / [strategy.us] — 시장별로 따로 (없으면 위 [strategy] 값)
+  signal · max_hold_days · market_filter · stop_loss_pct · take_profit_pct · min_hold_days
 """
 from __future__ import annotations
 
@@ -15,8 +19,20 @@ CORE_DEFAULT = {"kr": "069500", "us": "SPYM"}
 MA_LONG = 200
 
 
+MARKET_KEYS = ("signal", "max_hold_days", "market_filter", "stop_loss_pct", "take_profit_pct", "min_hold_days")
+
+
+def merged(raw: dict, market: str) -> dict:
+    """[strategy] 공통 값 위에 [strategy.<시장>] 값을 덮어쓴 것."""
+    raw = raw or {}
+    base = {k: v for k, v in raw.items() if not isinstance(v, dict)}
+    over = raw.get(market) if isinstance(raw.get(market), dict) else {}
+    return {**base, **over}
+
+
 def settings(cfg) -> dict:
-    s = getattr(cfg, "strategy", None) or {}
+    mk = getattr(cfg, "market", "kr")
+    s = merged(getattr(cfg, "strategy", None) or {}, mk)
     try:
         core = max(0, min(90, int(float(s.get("core_pct", 0)))))
     except (TypeError, ValueError):
@@ -27,9 +43,10 @@ def settings(cfg) -> dict:
         max_hold = 0
     sig = str(s.get("signal", "trend")).strip()
     from .signals import MODES
-    mk = getattr(cfg, "market", "kr")
+    rule_sell = str(s.get("rule_sell", "direct")).strip().lower()
     return {"market_filter": bool(s.get("market_filter", False)), "core_pct": core,
             "signal": sig if sig in MODES else "trend", "max_hold_days": max_hold,
+            "rule_sell": rule_sell if rule_sell in ("direct", "ai") else "direct",
             "core_code": str(s.get(f"core_{mk}") or CORE_DEFAULT[mk]).strip().upper() if mk == "us"
             else str(s.get(f"core_{mk}") or CORE_DEFAULT[mk]).strip()}
 

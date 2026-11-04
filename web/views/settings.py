@@ -53,7 +53,7 @@ def settings():
                            kakao=__import__("trader.notify", fromlist=["x"]).kakao_info(webapp.cfg().data_dir),
                            kakao_redirect=_public_base() + url_for("kakao_callback"),
                            backups=__import__("trader.backup", fromlist=["x"]).listing(webapp.cfg().data_dir),
-                           strat=raw.get("strategy", {}),
+                           strat=raw.get("strategy", {}), strat_m=_strategy_by_market(),
                            bk=__import__("trader.backup", fromlist=["x"]).settings(raw),
                            rmt=__import__("trader.remote", fromlist=["x"]).settings(raw),
                            rmt_types=__import__("trader.remote", fromlist=["x"]).TYPES,
@@ -318,3 +318,14 @@ def change_env():
     Journal(c.db_path).add_log(c.ledger, "env", "web", f"연결 정보 변경: {names}")
     webapp._restart_soon()
     return render_template("restarting.html", names=names)
+
+
+def _strategy_by_market() -> dict:
+    """시장별 실제 적용 값 (공통 + 시장별 덮어쓰기)."""
+    from trader import strategy
+    base = webapp.cfg()
+    out = {}
+    for mk in ("kr", "us"):
+        c = base.for_market(mk)
+        out[mk] = {**strategy.settings(c), "stop": c.stop_loss_pct, "take": c.take_profit_pct, "min_hold": c.min_hold_days}
+    return out

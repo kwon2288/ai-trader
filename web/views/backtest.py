@@ -116,6 +116,28 @@ def backtest_page():
                            n_full=backtest.grid_size(backtest.GRID), n_short=backtest.grid_size(backtest.SHORT_GRID))
 
 
+def _market_values(f, p: str) -> tuple[dict | None, str | None]:
+    """폼에서 시장별 전략 값 (p = 'kr_' / 'us_'). (값, 오류)"""
+    from trader.signals import MODES
+    try:
+        v = {"signal": f.get(p + "signal", "trend"), "max_hold_days": int(float(f.get(p + "max_hold_days", 0) or 0)),
+             "stop_loss_pct": float(f.get(p + "stop")), "take_profit_pct": float(f.get(p + "take")),
+             "min_hold_days": int(float(f.get(p + "min_hold", 0) or 0)),
+             "market_filter": f.get(p + "market_filter") in ("1", "on", "true", "True")}
+    except (TypeError, ValueError):
+        return None, "숫자를 확인하세요."
+    if v["signal"] not in MODES or not (0 <= v["max_hold_days"] <= 60 and -50 <= v["stop_loss_pct"] < 0
+                                        and 0 < v["take_profit_pct"] <= 200 and 0 <= v["min_hold_days"] <= 60):
+        return None, "손절(-50~0)·익절(0~200)·최소/최대 보유일(0~60)을 확인하세요."
+    return v, None
+
+
+def _write_market(text: str, mk: str, v: dict) -> str:
+    for k, val in v.items():
+        text = settings_io._set(text, f"strategy.{mk}", k, val)
+    return text
+
+
 @app.post("/strategy/save")
 @login_required
 def strategy_save():
@@ -124,18 +146,22 @@ def strategy_save():
         core = int(float(f.get("core_pct", "0") or 0))
     except ValueError:
         core = -1
-    try:
-        max_hold = int(float(f.get("max_hold_days", "0") or 0))
-    except ValueError:
-        max_hold = -1
-    from trader.signals import MODES
-    if not 0 <= core <= 90 or not 0 <= max_hold <= 60 or f.get("signal", "trend") not in MODES:
-        flash("코어 비중은 0~90%, 최대 보유일은 0~60일 입니다.", "err")
+    vals = {}
+    for mk in ("kr", "us"):
+        if f.get(mk + "_stop") is None:
+            continue
+        v, err = _market_values(f, mk + "_")
+        if err:
+            flash(f"{'국내' if mk == 'kr' else '미국'}: {err}", "err")
+            return redirect(url_for("settings") + "#strategy")
+        vals[mk] = v
+    if not 0 <= core <= 90:
+        flash("코어 비중은 0~90% 입니다.", "err")
         return redirect(url_for("settings") + "#strategy")
     text = webapp.CONFIG_PATH.read_text(encoding="utf-8")
-    text = settings_io._set(text, "strategy", "signal", f.get("signal", "trend"))
-    text = settings_io._set(text, "strategy", "max_hold_days", max_hold)
-    text = settings_io._set(text, "strategy", "market_filter", bool(f.get("market_filter")))
+    for mk, v in vals.items():
+        text = _write_market(text, mk, v)
+    text = settings_io._set(text, "strategy", "rule_sell", "ai" if f.get("rule_sell") == "ai" else "direct")
     text = settings_io._set(text, "strategy", "core_pct", core)
     for mk in ("kr", "us"):
         v = cfgmod.norm_symbol((f.get(f"core_{mk}") or "").strip(), mk)
@@ -164,14 +190,12 @@ def strategy_apply():
             and 0 <= max_hold <= 60 and signal in MODES):
         flash("범위를 벗어난 값입니다.", "err")
         return redirect(request.referrer or url_for("settings"))
+    mk = f.get("market") if f.get("market") in ("kr", "us") else webapp.current_market()
     text = webapp.CONFIG_PATH.read_text(encoding="utf-8")
-    text = settings_io._set(text, "risk", "stop_loss_pct", stop)
-    text = settings_io._set(text, "risk", "take_profit_pct", take)
-    text = settings_io._set(text, "risk", "min_hold_days", hold)
-    text = settings_io._set(text, "strategy", "market_filter", f.get("market_filter") in ("1", "on", "true", "True"))
+    text = _write_market(text, mk, {"signal": signal, "max_hold_days": max_hold, "stop_loss_pct": stop,
+                                    "take_profit_pct": take, "min_hold_days": hold,
+                                    "market_filter": f.get("market_filter") in ("1", "on", "true", "True")})
     text = settings_io._set(text, "strategy", "core_pct", core)
-    text = settings_io._set(text, "strategy", "signal", signal)
-    text = settings_io._set(text, "strategy", "max_hold_days", max_hold)
     for mk in ("kr", "us"):
         v = (f.get(f"core_{mk}") or "").strip()
         if v:
@@ -180,9 +204,10 @@ def strategy_apply():
                 text = settings_io._set(text, "strategy", f"core_{mk}", v)
     webapp.CONFIG_PATH.write_text(text, encoding="utf-8")
     c = webapp.cfg()
-    Journal(c.db_path).add_log(c.ledger, "strategy", "web",
-                               f"전략 적용: {label(signal)} · 최대 보유 {max_hold or '제한 없음'}{'일' if max_hold else ''} · 손절 {stop}% · 익절 +{take}% · 최소 보유 {hold}일 · 시장필터 "
+    Journal(c.db_path).add_log(c.for_market(mk).ledger, "strategy", "web",
+                               f"{'국내' if mk == 'kr' else '미국'} 전략 적용: {label(signal)} · 최대 보유 {max_hold or '제한 없음'}{'일' if max_hold else ''} · 손절 {stop}% · 익절 +{take}% · 최소 보유 {hold}일 · 시장필터 "
                                f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}%")
     flash(f"적용했어요: {label(signal)} · 최대 보유 {str(max_hold) + '일' if max_hold else '제한 없음'} · 손절 {stop}% · 익절 +{take}% · 최소 보유 {hold}일 · 시장 필터 "
-          f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}% — 다음 실행부터 (국내·미국 공통)", "ok")
+          f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}% — "
+          f"{'국내' if mk == 'kr' else '미국'}에 적용, 다음 실행부터", "ok")
     return redirect(request.referrer or url_for("settings"))

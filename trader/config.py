@@ -59,7 +59,8 @@ class Config:
     mode_source: str = "env"          # env=.env 의 TRADING_MODE, web=웹에서 바꿈(data/mode.json)
     live_ack: bool = False            # 웹에서 실계좌 전환 확인을 거쳤는지
     daily_loss_pct: float = 0.0       # 하루 손실 한도 (예산 대비 %, 0 = 끔)
-    kr_base: "Config | None" = field(default=None, repr=False, compare=False)   # 미국 설정에서 국내 설정으로 돌아갈 때
+    kr_base: "Config | None" = field(default=None, repr=False, compare=False)
+    risk_base: dict = field(default_factory=dict, repr=False, compare=False)   # [risk] 공통 손절·익절·최소 보유   # 미국 설정에서 국내 설정으로 돌아갈 때
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
 
     @property
@@ -81,12 +82,14 @@ class Config:
         return bool(self.us.get("enabled", False))
 
     def for_market(self, market: str) -> "Config":
-        """시장별 설정. 위험관리 비율(손절·익절·확신도 등)은 공유하고 예산·종목만 바꾼다."""
+        """시장별 설정. 예산·종목을 바꾸고, 손절·익절·최소 보유일은 [strategy.<시장>] 에 있으면 그 값
+        (없으면 [risk] 공통 값)."""
         if market == "kr":
             return self.kr_base or self
         if market != "us":
             raise ValueError(f"알 수 없는 시장: {market} (kr/us)")
         u = self.us
+        risk = _market_risk(self.risk_base or {}, self.strategy, "us")
         return replace(
             self, market="us", currency="USD",
             total_krw=float(u.get("total_usd", 300)),               # 이름은 _krw 지만 미국에선 달러
@@ -97,6 +100,7 @@ class Config:
             symbols=[norm_symbol(x, "us") for x in u.get("symbols", [])],
             auto_count=0,                                            # 미국 자동 선정은 아직 미지원
             kr_base=self.kr_base or self,
+            **risk,
         )
 
     def money(self, v) -> str:
@@ -109,6 +113,21 @@ class Config:
     @property
     def stop_file(self) -> Path:
         return self.data_dir / "STOP"
+
+
+def _market_risk(base: dict, strategy: dict, market: str) -> dict:
+    """[strategy.<시장>] 의 손절·익절·최소 보유일 (없으면 [risk] 공통 값)."""
+    over = (strategy or {}).get(market)
+    over = over if isinstance(over, dict) else {}
+    out = {}
+    for k, typ in (("stop_loss_pct", float), ("take_profit_pct", float), ("min_hold_days", int)):
+        v = over.get(k, base.get(k))
+        if v is not None:
+            try:
+                out[k] = typ(float(v))
+            except (TypeError, ValueError):
+                pass
+    return out
 
 
 def norm_symbol(code, market: str = "kr") -> str:
@@ -180,5 +199,10 @@ def load(config_path: Path | None = None) -> Config:
         strategy=dict(raw.get("strategy", {})),
         data_dir=data_dir,
     )
+    # 국내 설정(기본 cfg)에 [strategy.kr] 손절·익절·최소 보유 반영, [risk] 공통 값은 미국 기본값으로 기억
+    cfg.risk_base = {"stop_loss_pct": cfg.stop_loss_pct, "take_profit_pct": cfg.take_profit_pct,
+                     "min_hold_days": cfg.min_hold_days}
+    for k, v in _market_risk(cfg.risk_base, cfg.strategy, "kr").items():
+        setattr(cfg, k, v)
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     return cfg

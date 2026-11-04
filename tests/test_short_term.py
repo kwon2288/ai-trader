@@ -103,13 +103,14 @@ def test_apply_writes_signal_and_max_hold():
         cl.post("/strategy/apply", data={"stop": "-5", "take": "7", "min_hold": "1", "core_pct": "0",
                                          "market_filter": "0", "signal": "breakout", "max_hold": "5"})
         t = tomllib.loads(p.read_text())
-        assert t["strategy"]["signal"] == "breakout" and t["strategy"]["max_hold_days"] == 5
-        assert t["risk"]["take_profit_pct"] == 7
+        k = t["strategy"]["kr"]
+        assert k["signal"] == "breakout" and k["max_hold_days"] == 5 and k["take_profit_pct"] == 7
         cl.post("/strategy/apply", data={"stop": "-5", "take": "7", "min_hold": "1", "core_pct": "0", "signal": "x"})
-        assert tomllib.loads(p.read_text())["strategy"]["signal"] == "breakout"     # 모르는 신호는 거부
-        cl.post("/strategy/save", data={"signal": "volume", "max_hold_days": "10", "core_pct": "0"})
+        assert tomllib.loads(p.read_text())["strategy"]["kr"]["signal"] == "breakout"     # 모르는 신호는 거부
+        cl.post("/strategy/save", data={"kr_signal": "volume", "kr_max_hold_days": "10", "kr_stop": "-5",
+                                        "kr_take": "7", "kr_min_hold": "1", "core_pct": "0"})
         t = tomllib.loads(p.read_text())
-        assert t["strategy"]["signal"] == "volume" and t["strategy"]["max_hold_days"] == 10
+        assert t["strategy"]["kr"]["signal"] == "volume" and t["strategy"]["kr"]["max_hold_days"] == 10
         h = cl.get("/backtest").get_data(as_text=True)
         assert "단기 매매 비교" in h and "눌림목 반등" in h
     finally:

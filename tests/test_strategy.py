@@ -110,10 +110,11 @@ def test_apply_route_writes_config():
             s["ok"] = True
         cl.post("/strategy/apply", data={"stop": "-8", "take": "20", "min_hold": "7", "core_pct": "70", "market_filter": "1"})
         t = tomllib.loads(p.read_text())
-        assert t["risk"]["stop_loss_pct"] == -8 and t["risk"]["take_profit_pct"] == 20 and t["risk"]["min_hold_days"] == 7
-        assert t["strategy"]["core_pct"] == 70 and t["strategy"]["market_filter"] is True
+        k = t["strategy"]["kr"]                                                    # 시장을 안 주면 지금 보는 시장(국내)
+        assert k["stop_loss_pct"] == -8 and k["take_profit_pct"] == 20 and k["min_hold_days"] == 7
+        assert t["strategy"]["core_pct"] == 70 and k["market_filter"] is True
         cl.post("/strategy/apply", data={"stop": "5", "take": "20", "min_hold": "7", "core_pct": "70"})
-        assert tomllib.loads(p.read_text())["risk"]["stop_loss_pct"] == -8       # 잘못된 값은 거부
+        assert tomllib.loads(p.read_text())["strategy"]["kr"]["stop_loss_pct"] == -8       # 잘못된 값은 거부
     finally:
         W.CONFIG_PATH = old
 

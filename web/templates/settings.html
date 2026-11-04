@@ -118,20 +118,32 @@
 </form>
 
 {% set sig_labels = {'trend': '추세 추종', 'dip': '눌림목 반등', 'breakout': '신고가 돌파', 'volume': '거래량 급증'} %}
-<div class="card sec" id="strategy" data-sum="{{ sig_labels.get(strat.get('signal', 'trend'), '추세 추종') }}{{ (' · 최대 ' ~ strat.get('max_hold_days') ~ '일') if strat.get('max_hold_days') }} · 시장 필터 {{ '켬' if strat.get('market_filter') else '끔' }} · 코어 {{ strat.get('core_pct', 0) }}%">
-  <h2 class="sec-head">전략 — 매매 신호 · 시장 필터 · 코어-위성</h2>
+<div class="card sec" id="strategy" data-sum="국내 {{ sig_labels.get(strat_m.kr.signal) }} · 미국 {{ sig_labels.get(strat_m.us.signal) }} · 규칙 매도 {{ '바로' if strat_m.kr.rule_sell == 'direct' else 'AI 확인' }}{{ (' · 코어 ' ~ strat.get('core_pct') ~ '%') if strat.get('core_pct') }}">
+  <h2 class="sec-head">전략 — 시장별 매매 신호 · 손절·익절 · 시장 필터 · 코어</h2>
   <form method="post" action="{{ url_for('strategy_save') }}">
-    <div class="grid2" style="margin-bottom:8px">
-      <div><label for="signal_s">매매 신호</label>
-        <select id="signal_s" name="signal">{% for k, l in sig_labels.items() %}
-          <option value="{{ k }}" {{ 'selected' if strat.get('signal', 'trend') == k }}>{{ l }}</option>{% endfor %}</select></div>
-      <div><label for="max_hold_s">최대 보유일 (지나면 정리, 0 = 제한 없음)</label>
-        <input id="max_hold_s" name="max_hold_days" value="{{ strat.get('max_hold_days', 0) }}" inputmode="numeric"></div>
+    {% for mk, nm in [('kr', '🇰🇷 국내'), ('us', '🇺🇸 미국')] %}{% set v = strat_m[mk] %}
+    <h3 style="margin:{{ '4px' if loop.first else '16px' }} 0 6px;font-size:15px">{{ nm }}</h3>
+    <div class="grid2">
+      <div><label for="{{ mk }}_signal">매매 신호</label>
+        <select id="{{ mk }}_signal" name="{{ mk }}_signal">{% for k, l in sig_labels.items() %}
+          <option value="{{ k }}" {{ 'selected' if v.signal == k }}>{{ l }}</option>{% endfor %}</select></div>
+      <div><label for="{{ mk }}_max_hold_days">최대 보유일 (지나면 정리, 0 = 제한 없음)</label>
+        <input id="{{ mk }}_max_hold_days" name="{{ mk }}_max_hold_days" value="{{ v.max_hold_days }}" inputmode="numeric"></div>
+      <div><label for="{{ mk }}_stop">손절 (%)</label><input id="{{ mk }}_stop" name="{{ mk }}_stop" value="{{ '%g'|format(v.stop) }}" inputmode="decimal"></div>
+      <div><label for="{{ mk }}_take">익절 (%)</label><input id="{{ mk }}_take" name="{{ mk }}_take" value="{{ '%g'|format(v.take) }}" inputmode="decimal"></div>
+      <div><label for="{{ mk }}_min_hold">최소 보유일 (이 전엔 규칙·AI 매도 안 함, 손절은 예외)</label>
+        <input id="{{ mk }}_min_hold" name="{{ mk }}_min_hold" value="{{ v.min_hold }}" inputmode="numeric"></div>
+      <div><label style="display:flex;gap:8px;align-items:center;margin-top:26px;color:var(--fg)">
+        <input type="checkbox" name="{{ mk }}_market_filter" style="width:auto" {{ 'checked' if v.market_filter }}>
+        시장 필터 ({{ 'KODEX 200' if mk == 'kr' else 'SPY' }} 200일선 아래면 새로 안 삼)</label></div>
     </div>
-    <label style="display:flex;gap:8px;align-items:flex-start;color:var(--fg)">
-      <input type="checkbox" name="market_filter" style="width:auto;margin-top:3px" {{ 'checked' if strat.get('market_filter') }}>
-      <span>시장 필터 — 지수가 200일선 아래면 새로 사지 않기
-        <span class="mute" style="display:block">국내는 KODEX 200, 미국은 SPY 기준. 하락장에서 새 매수를 멈춰 손실을 줄여요 (매도·손절은 그대로).</span></span></label>
+    {% endfor %}
+    <h3 style="margin:16px 0 6px;font-size:15px">공통</h3>
+    <label for="rule_sell">규칙 매도 신호 (예: 눌림목의 RSI 60 반등 완료, 돌파의 10일 최저가 이탈)</label>
+    <select id="rule_sell" name="rule_sell">
+      <option value="direct" {{ 'selected' if strat_m.kr.rule_sell == 'direct' }}>바로 매도 — AI 확인 없이 (백테스트와 같게, 권장)</option>
+      <option value="ai" {{ 'selected' if strat_m.kr.rule_sell == 'ai' }}>AI 가 확인 — AI 가 ‘유지’면 안 팖</option>
+    </select>
     <div class="grid2" style="margin-top:8px">
       <div><label for="core_pct_s">코어 ETF 비중 (%, 0 = 끔)</label><input id="core_pct_s" name="core_pct" value="{{ strat.get('core_pct', 0) }}" inputmode="numeric"></div>
       <div><label for="core_kr">국내 코어 ETF</label><input id="core_kr" name="core_kr" value="{{ strat.get('core_kr', '069500') }}"></div>
@@ -140,7 +152,9 @@
     <div class="row" style="margin-top:10px"><button class="btn">전략 저장</button>
       <a class="btn" href="{{ url_for('backtest_page') }}">🔍 백테스트로 비교해 보기</a></div>
   </form>
-  <div class="mute" style="margin-top:8px"><b>코어-위성</b>: 예산 중 코어 비중만큼은 지수 ETF 를 사서 계속 들고 있고(매매·손절 안 함),
+  <div class="mute" style="margin-top:8px">시장별 값은 백테스트 결과의 ‘적용’ 버튼으로도 바뀌어요 (그 시장에만).
+    위험 관리의 손절·익절·최소 보유일은 여기 값이 없을 때 쓰는 기본값이에요.<br>
+    <b>코어-위성</b>: 예산 중 코어 비중만큼은 지수 ETF 를 사서 계속 들고 있고(매매·손절 안 함),
     나머지만 봇이 사고팔아요. 예) 예산 20만원 · 코어 70% → 14만원은 KODEX 200 보유, 6만원으로 봇 매매.
     직접 갖고 있는 종목은 코어로 고를 수 없어요(섞이지 않게).</div>
 </div>

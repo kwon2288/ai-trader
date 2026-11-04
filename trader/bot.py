@@ -63,6 +63,11 @@ def near_close(market: str, at=None) -> int:
     return left if 0 < left <= CLOSE_WINDOW_MIN else 0
 
 
+def strategy_mode(cfg) -> str:
+    from . import strategy
+    return strategy.settings(cfg)["signal"]
+
+
 class Bot:
     def __init__(self, cfg: Config, broker, analyst, journal: Journal | None = None):
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
@@ -143,6 +148,40 @@ class Bot:
             else:
                 self.j.reduce_position(code, qty)
         return True
+
+    def _direct_rule_sells(self, sig: dict, held: dict, quotes: dict, run_id, analyze_only: bool) -> int | None:
+        """규칙 매도 신호를 AI 확인 없이 바로 실행 (sig 에서 뺀다). 매도 신호가 없으면 None, 있으면 실행 건수."""
+        cfg = self.cfg
+        sells = [c for c, s in sig.items() if s["type"].startswith("SELL") and c in held]
+        if not sells:
+            return None
+        from . import signals
+        n = 0
+        for c in sells:
+            s = sig.pop(c)
+            h = held[c]
+            d = {"code": c, "action": "SELL", "confidence": s["strength"], "sell_ratio": 1.0,
+                 "reason": f"[규칙 매도 · {signals.label(strategy_mode(cfg))} — AI 확인 없이] {s['reason']}"}
+            if self.j.held_days(c) < cfg.min_hold_days:
+                outcome = f"보류 (최소 보유 {cfg.min_hold_days}일 미달)"
+            elif analyze_only:
+                outcome = "분석 전용 — 주문 안 함"
+            else:
+                qty = h.qty if cfg.mode == "dry" else min(h.qty, self.broker.sellable_qty(c))
+                if qty <= 0:
+                    outcome = "매도 가능 수량 없음"
+                else:
+                    q = quotes.get(c)
+                    ok = self._exec("SELL", c, h.name, qty, (q.bid or q.price) if q else h.now_price,
+                                    f"규칙 매도: {s['reason']}")
+                    outcome = "매도 실행" if ok else "매도 실패"
+                    if ok:
+                        n += 1
+                        if qty >= h.qty:
+                            held.pop(c)
+            self.j.add_decision(run_id, d, outcome, h.name)
+            self.say(f"📏 규칙 매도 {h.name} → {outcome}\n    └ {s['reason']} (AI 확인 없이 바로)")
+        return n
 
     def _daily_loss_check(self, st: dict) -> None:
         cfg = self.cfg
@@ -455,6 +494,12 @@ class Bot:
             can_buy = (len(held) < cfg.max_positions and cheapest > 0 and cash_now >= cheapest
                        and not self.no_buy_reason)
             sig = signals.evaluate(candidates, can_buy=can_buy, mode=sg["signal"])
+            if sg["rule_sell"] == "direct":
+                n_sold = self._direct_rule_sells(sig, held, quotes, run_id, analyze_only)
+                if n_sold is not None and not sig:
+                    self.j.finish_run(run_id, f"규칙 매도 {n_sold}건 바로 실행 — 매수 신호 없어 AI 호출 생략",
+                                      {"_provider": "규칙", "decisions": []})
+                    return self._out()
             if not sig:
                 why = "" if can_buy else " (매수 여력·빈 자리 없음 → 매도 신호만 확인)"
                 self.say(f"📏 규칙 신호 없음{why} — AI 호출 생략 ({len(candidates)}종목 확인, 토큰 0)")

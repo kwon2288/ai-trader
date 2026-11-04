@@ -81,6 +81,7 @@
         <input type="hidden" name="stop" value="{{ x.stop }}"><input type="hidden" name="take" value="{{ x.take }}">
         <input type="hidden" name="min_hold" value="{{ x.min_hold }}"><input type="hidden" name="core_pct" value="{{ x.core_pct }}">
         <input type="hidden" name="market_filter" value="{{ '1' if x.market_filter else '0' }}">
+        <input type="hidden" name="market" value="{{ market }}">
         <input type="hidden" name="signal" value="{{ x.signal or 'trend' }}"><input type="hidden" name="max_hold" value="{{ x.max_hold or 0 }}">
         <button class="btn" style="padding:4px 9px;font-size:12px;white-space:nowrap">적용</button></form></td></tr>
     {% endfor %}
