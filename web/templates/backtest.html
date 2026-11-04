@@ -59,6 +59,12 @@
   {% endif %}
   {% set v = sw.validation %}
   {% if v %}
+  <div class="mute" style="margin-bottom:8px">
+    {% if sw.pick is not none %}<b>추천 = {{ sw.pick + 1 }}번</b> — 앞 기간 순위가 높은 것부터 보면서 뒤 기간에도
+      {{ '플러스이고 지수보다 나은' if sw.rows[sw.pick].oos_bench_pct is not none and sw.rows[sw.pick].oos_return_pct > sw.rows[sw.pick].oos_bench_pct else '플러스인' }} 첫 조합이에요.
+    {% else %}<b>추천 없음</b> — 뒤 기간에도 플러스인 조합이 없어요. 이 종목·기간에선 지금 신호들이 잘 안 통한다는 뜻이에요.{% endif %}</div>
+  {% endif %}
+  {% if v %}
   {% set d1, d2 = sw.split.is_end, sw.split.oos_start %}
   <div class="flash" style="margin:0 0 10px;background:{{ 'var(--okbg)' if v.oos_positive >= 7 else ('var(--warnbg)' if v.oos_positive >= 4 else 'var(--errbg)') }};color:{{ 'var(--ok)' if v.oos_positive >= 7 else ('var(--warn)' if v.oos_positive >= 4 else 'var(--err)') }}">
     <b>앞/뒤 기간 검증</b> — 앞 기간(~{{ d1[2:4] }}.{{ d1[4:6] }}.{{ d1[6:] }})으로 순위를 매긴 상위 {{ v.top }}개를
@@ -70,9 +76,11 @@
   {% endif %}
   <div class="scroll"><table>
     <tr><th>#</th><th>조건</th><th class="r">{{ '앞 기간 (고르기)' if v else '수익률 · 낙폭' }}</th>{% if v %}<th class="r">뒤 기간 (확인)</th>{% endif %}<th></th></tr>
-    {% for x in sw.rows[:15] %}
-    <tr {% if loop.first %}style="background:var(--okbg)"{% endif %}>
-      <td>{{ loop.index }}{% if loop.first %}<div style="font-size:11px">추천</div>{% endif %}</td>
+    {% set pk = sw.pick %}
+    {% set shown = sw.rows[:15] + ([sw.rows[pk]] if pk is not none and pk >= 15 else []) %}
+    {% for x in shown %}{% set idx = sw.rows.index(x) %}
+    <tr {% if idx == pk %}style="background:var(--okbg)"{% endif %}>
+      <td>{{ idx + 1 }}{% if idx == pk %}<div style="font-size:11px">추천</div>{% endif %}</td>
       <td style="font-size:13px">{% if sw.kind == 'short' %}<b>{{ modes.get(x.signal, x.signal) }}</b> · {% endif %}손절 {{ x.stop }}% · 익절 +{{ x.take }}%<div class="mute">{% if sw.kind == 'short' %}최대 {{ (x.max_hold ~ '일') if x.max_hold else '제한 없음' }}{% else %}보유 {{ x.min_hold }}일{% endif %}{{ ' · 필터' if x.market_filter }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회{% if x.avg_trade_pct is defined and x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></td>
       <td class="r nw">{{ pct(x.return_pct) }}<div class="mute"><span class="down">{{ "%.1f"|format(x.mdd_pct) }}%</span>{{ ' · 지수↑' if x.bench_pct is not none and x.return_pct > x.bench_pct }}</div></td>
       {% if v %}<td class="r nw">{{ pct(x.oos_return_pct) }}{{ ' ✅' if x.oos_return_pct > 0 }}<div class="mute"><span class="down">{{ "%.1f"|format(x.oos_mdd_pct) }}%</span> · {{ x.oos_n }}회{{ ' · 지수↑' if x.oos_bench_pct is not none and x.oos_return_pct > x.oos_bench_pct }}</div></td>{% endif %}

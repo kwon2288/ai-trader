@@ -220,6 +220,35 @@ def test_timer_state_and_enable_route():
         schedule.subprocess.run, schedule.shutil.which, schedule.SYSTEMD = o_run, o_which, o_sys
 
 
+def test_pick_uses_out_of_sample():
+    rows = [{"oos_return_pct": -2, "oos_bench_pct": 5}, {"oos_return_pct": 6, "oos_bench_pct": 8},
+            {"oos_return_pct": 9, "oos_bench_pct": 8}]
+    assert backtest.pick(rows) == 2                         # 뒤 기간 플러스 + 지수보다 나은 첫 줄
+    rows[2]["oos_return_pct"] = 7
+    assert backtest.pick(rows) == 1                         # 지수를 이긴 게 없으면 플러스인 첫 줄
+    assert backtest.pick([{"oos_return_pct": -1}]) is None
+    assert backtest.pick([{"return_pct": 3}]) == 0          # 검증 없는 예전 결과
+    # 화면: 추천이 그 줄에 붙는다
+    import json
+    W = web()
+    c = W.cfg()
+    base = {"signal": "breakout", "stop": -3, "take": 15, "min_hold": 1, "max_hold": 10, "market_filter": False,
+            "core_pct": 0, "return_pct": 23.8, "mdd_pct": -9.4, "n": 118, "win_rate": 50, "fees": 1, "bench_pct": 10,
+            "avg_trade_pct": 0.9, "gross_return_pct": 25, "oos_mdd_pct": -11, "oos_n": 50, "oos_bench_pct": 20,
+            "oos_avg_trade_pct": 0.1, "score": 1}
+    sw = {"ts": "2026-11-05T08:00:00", "days": 750, "symbols": ["A"], "kind": "short", "bench_pct": 10,
+          "rows": [{**base, "oos_return_pct": -2.21}, {**base, "stop": -8, "oos_return_pct": 6.42}],
+          "seconds": 1, "start": "20240101", "end": "20261101", "fee_pct": 0.015, "best_by_signal": [], "positive": 2,
+          "split": {"is_end": "20250901", "oos_start": "20250902"},
+          "validation": {"top": 2, "oos_positive": 1, "oos_beat_bench": 0, "oos_bench_pct": 20, "oos_avg_top": 2}}
+    (Path(c.data_dir) / "sweep_kr.json").write_text(json.dumps(sw))
+    cl = W.app.test_client()
+    with cl.session_transaction() as s:
+        s["ok"] = True
+    h = cl.get("/backtest?market=kr").get_data(as_text=True)
+    assert "추천 = 2번" in h
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

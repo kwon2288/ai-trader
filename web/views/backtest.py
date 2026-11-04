@@ -24,7 +24,7 @@ def _run_backtest(market: str, p: dict) -> None:
             from trader.signals import label
             r = backtest.sweep(c, make_broker(c), p["days"], p["symbols"], BENCH[market][0], progress=prog,
                                kind=p.get("kind", "full"))
-            best = r["rows"][0] if r["rows"] else None
+            best = r["rows"][r["pick"]] if r.get("pick") is not None else None
             j.add_log(c.ledger, "backtest", "web", f"{'단기 매매' if r['kind'] == 'short' else '자동'} 비교 "
                       f"{len(r['rows'])}개 조합 ({r['seconds']}초)" + (
                 f" — 추천: {label(best['signal'])} · 손절 {best['stop']}% · 익절 +{best['take']}% · "

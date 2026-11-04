@@ -363,6 +363,7 @@ def sweep(cfg, broker, days: int, symbols: list[str], bench_code: str, progress=
            "best_by_signal": list(best_by.values()),
            "positive": sum(1 for x in rows if x["return_pct"] > 0),
            "split": {"is_end": is_to, "oos_start": cut} if cut else None}
+    out["pick"] = pick(rows)
     if cut:
         top = rows[:10]
         out["validation"] = {
@@ -378,8 +379,28 @@ def sweep(cfg, broker, days: int, symbols: list[str], bench_code: str, progress=
     return out
 
 
+def pick(rows: list[dict]) -> int | None:
+    """추천할 줄 번호(0부터). 앞/뒤 기간 검증이 있으면: 앞 기간 순위대로 보면서
+    ① 뒤 기간도 플러스이고 지수보다 나은 첫 줄 → ② 없으면 뒤 기간 플러스인 첫 줄 → ③ 없으면 추천 없음(None).
+    검증이 없으면(예전 결과) 1위."""
+    if not rows:
+        return None
+    if "oos_return_pct" not in rows[0]:
+        return 0
+    for i, x in enumerate(rows):
+        if x["oos_return_pct"] > 0 and x.get("oos_bench_pct") is not None and x["oos_return_pct"] > x["oos_bench_pct"]:
+            return i
+    for i, x in enumerate(rows):
+        if x["oos_return_pct"] > 0:
+            return i
+    return None
+
+
 def load_sweep(data_dir: Path, market: str) -> dict | None:
     try:
-        return json.loads((Path(data_dir) / f"sweep_{market}.json").read_text())
+        sw = json.loads((Path(data_dir) / f"sweep_{market}.json").read_text())
     except (OSError, ValueError):
         return None
+    if "pick" not in sw:                       # 예전에 저장한 결과도 새 기준으로
+        sw["pick"] = pick(sw.get("rows") or [])
+    return sw
