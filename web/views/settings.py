@@ -328,4 +328,5 @@ def _strategy_by_market() -> dict:
     for mk in ("kr", "us"):
         c = base.for_market(mk)
         out[mk] = {**strategy.settings(c), "stop": c.stop_loss_pct, "take": c.take_profit_pct, "min_hold": c.min_hold_days}
+        out[mk]["core_code"] = strategy.settings(c)["core_code"]
     return out

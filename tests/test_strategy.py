@@ -112,7 +112,7 @@ def test_apply_route_writes_config():
         t = tomllib.loads(p.read_text())
         k = t["strategy"]["kr"]                                                    # 시장을 안 주면 지금 보는 시장(국내)
         assert k["stop_loss_pct"] == -8 and k["take_profit_pct"] == 20 and k["min_hold_days"] == 7
-        assert t["strategy"]["core_pct"] == 70 and k["market_filter"] is True
+        assert k["core_pct"] == 70 and k["market_filter"] is True
         cl.post("/strategy/apply", data={"stop": "5", "take": "20", "min_hold": "7", "core_pct": "70"})
         assert tomllib.loads(p.read_text())["strategy"]["kr"]["stop_loss_pct"] == -8       # 잘못된 값은 거부
     finally:

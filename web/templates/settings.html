@@ -118,7 +118,7 @@
 </form>
 
 {% set sig_labels = {'trend': '추세 추종', 'dip': '눌림목 반등', 'breakout': '신고가 돌파', 'volume': '거래량 급증'} %}
-<div class="card sec" id="strategy" data-sum="국내 {{ sig_labels.get(strat_m.kr.signal) }} · 미국 {{ sig_labels.get(strat_m.us.signal) }} · 규칙 매도 {{ '바로' if strat_m.kr.rule_sell == 'direct' else 'AI 확인' }}{{ (' · 코어 ' ~ strat.get('core_pct') ~ '%') if strat.get('core_pct') }}">
+<div class="card sec" id="strategy" data-sum="국내 {{ sig_labels.get(strat_m.kr.signal) }} · 미국 {{ sig_labels.get(strat_m.us.signal) }} · 규칙 매도 {{ '바로' if strat_m.kr.rule_sell == 'direct' else 'AI 확인' }}{{ (' · 국내 코어 ' ~ strat_m.kr.core_pct ~ '%') if strat_m.kr.core_pct }}{{ (' · 미국 코어 ' ~ strat_m.us.core_pct ~ '%') if strat_m.us.core_pct }}">
   <h2 class="sec-head">전략 — 시장별 매매 신호 · 손절·익절 · 시장 필터 · 코어</h2>
   <form method="post" action="{{ url_for('strategy_save') }}">
     {% for mk, nm in [('kr', '🇰🇷 국내'), ('us', '🇺🇸 미국')] %}{% set v = strat_m[mk] %}
@@ -136,6 +136,10 @@
       <div><label style="display:flex;gap:8px;align-items:center;margin-top:26px;color:var(--fg)">
         <input type="checkbox" name="{{ mk }}_market_filter" style="width:auto" {{ 'checked' if v.market_filter }}>
         시장 필터 ({{ 'KODEX 200' if mk == 'kr' else 'SPY' }} 200일선 아래면 새로 안 삼)</label></div>
+      <div><label for="{{ mk }}_core_pct">코어 ETF 비중 (%, 0 = 끔) — 계속 보유, 봇 매매 안 함</label>
+        <input id="{{ mk }}_core_pct" name="{{ mk }}_core_pct" value="{{ v.core_pct }}" inputmode="numeric"></div>
+      <div><label for="core_{{ mk }}">코어 ETF ({{ '예: 069500 KODEX 200' if mk == 'kr' else '예: SPYM' }})</label>
+        <input id="core_{{ mk }}" name="core_{{ mk }}" value="{{ v.core_code }}"></div>
     </div>
     {% endfor %}
     <h3 style="margin:16px 0 6px;font-size:15px">공통</h3>
@@ -144,11 +148,6 @@
       <option value="direct" {{ 'selected' if strat_m.kr.rule_sell == 'direct' }}>바로 매도 — AI 확인 없이 (백테스트와 같게, 권장)</option>
       <option value="ai" {{ 'selected' if strat_m.kr.rule_sell == 'ai' }}>AI 가 확인 — AI 가 ‘유지’면 안 팖</option>
     </select>
-    <div class="grid2" style="margin-top:8px">
-      <div><label for="core_pct_s">코어 ETF 비중 (%, 0 = 끔)</label><input id="core_pct_s" name="core_pct" value="{{ strat.get('core_pct', 0) }}" inputmode="numeric"></div>
-      <div><label for="core_kr">국내 코어 ETF</label><input id="core_kr" name="core_kr" value="{{ strat.get('core_kr', '069500') }}"></div>
-      <div><label for="core_us">미국 코어 ETF</label><input id="core_us" name="core_us" value="{{ strat.get('core_us', 'SPYM') }}"></div>
-    </div>
     <div class="row" style="margin-top:10px"><button class="btn">전략 저장</button>
       <a class="btn" href="{{ url_for('backtest_page') }}">🔍 백테스트로 비교해 보기</a></div>
   </form>

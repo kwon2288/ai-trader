@@ -52,11 +52,17 @@ def test_save_and_apply_routes():
             form.update({f"{mk}_signal": sig, f"{mk}_max_hold_days": "10", f"{mk}_stop": stop, f"{mk}_take": "8",
                          f"{mk}_min_hold": "1"})
         form["us_market_filter"] = "on"
+        form["kr_core_pct"] = "70"
+        form["us_core_pct"] = "0"
         cl.post("/strategy/save", data=form)
         t = tomllib.loads(p.read_text())
         assert t["strategy"]["kr"]["signal"] == "breakout" and t["strategy"]["us"]["stop_loss_pct"] == -6
         assert t["strategy"]["us"]["market_filter"] is True and t["strategy"]["kr"]["market_filter"] is False
         assert t["strategy"]["rule_sell"] == "direct"
+        assert t["strategy"]["kr"]["core_pct"] == 70 and t["strategy"]["us"]["core_pct"] == 0     # 코어도 시장별
+        c = cfgmod.load(p)
+        assert strategy.settings(c)["core_pct"] == 70 and strategy.settings(c.for_market("us"))["core_pct"] == 0
+        assert strategy.settings(c)["core_code"] == "069500"
         # 백테스트 ‘적용’ — 그 시장에만
         cl.post("/strategy/apply", data={"market": "us", "stop": "-3", "take": "5", "min_hold": "1", "core_pct": "0",
                                          "signal": "volume", "max_hold": "5", "market_filter": "0"})

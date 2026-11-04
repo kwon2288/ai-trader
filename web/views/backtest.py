@@ -123,9 +123,12 @@ def _market_values(f, p: str) -> tuple[dict | None, str | None]:
         v = {"signal": f.get(p + "signal", "trend"), "max_hold_days": int(float(f.get(p + "max_hold_days", 0) or 0)),
              "stop_loss_pct": float(f.get(p + "stop")), "take_profit_pct": float(f.get(p + "take")),
              "min_hold_days": int(float(f.get(p + "min_hold", 0) or 0)),
-             "market_filter": f.get(p + "market_filter") in ("1", "on", "true", "True")}
+             "market_filter": f.get(p + "market_filter") in ("1", "on", "true", "True"),
+             "core_pct": int(float(f.get(p + "core_pct", 0) or 0))}
     except (TypeError, ValueError):
         return None, "숫자를 확인하세요."
+    if not 0 <= v["core_pct"] <= 90:
+        return None, "코어 비중은 0~90% 입니다."
     if v["signal"] not in MODES or not (0 <= v["max_hold_days"] <= 60 and -50 <= v["stop_loss_pct"] < 0
                                         and 0 < v["take_profit_pct"] <= 200 and 0 <= v["min_hold_days"] <= 60):
         return None, "손절(-50~0)·익절(0~200)·최소/최대 보유일(0~60)을 확인하세요."
@@ -142,10 +145,6 @@ def _write_market(text: str, mk: str, v: dict) -> str:
 @login_required
 def strategy_save():
     f = request.form
-    try:
-        core = int(float(f.get("core_pct", "0") or 0))
-    except ValueError:
-        core = -1
     vals = {}
     for mk in ("kr", "us"):
         if f.get(mk + "_stop") is None:
@@ -155,14 +154,10 @@ def strategy_save():
             flash(f"{'국내' if mk == 'kr' else '미국'}: {err}", "err")
             return redirect(url_for("settings") + "#strategy")
         vals[mk] = v
-    if not 0 <= core <= 90:
-        flash("코어 비중은 0~90% 입니다.", "err")
-        return redirect(url_for("settings") + "#strategy")
     text = webapp.CONFIG_PATH.read_text(encoding="utf-8")
     for mk, v in vals.items():
         text = _write_market(text, mk, v)
     text = settings_io._set(text, "strategy", "rule_sell", "ai" if f.get("rule_sell") == "ai" else "direct")
-    text = settings_io._set(text, "strategy", "core_pct", core)
     for mk in ("kr", "us"):
         v = cfgmod.norm_symbol((f.get(f"core_{mk}") or "").strip(), mk)
         if v:
@@ -194,8 +189,8 @@ def strategy_apply():
     text = webapp.CONFIG_PATH.read_text(encoding="utf-8")
     text = _write_market(text, mk, {"signal": signal, "max_hold_days": max_hold, "stop_loss_pct": stop,
                                     "take_profit_pct": take, "min_hold_days": hold,
-                                    "market_filter": f.get("market_filter") in ("1", "on", "true", "True")})
-    text = settings_io._set(text, "strategy", "core_pct", core)
+                                    "market_filter": f.get("market_filter") in ("1", "on", "true", "True"),
+                                    "core_pct": core})
     for mk in ("kr", "us"):
         v = (f.get(f"core_{mk}") or "").strip()
         if v:
