@@ -72,6 +72,8 @@ class Bot:
     def __init__(self, cfg: Config, broker, analyst, journal: Journal | None = None):
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
         self.j = journal or Journal(cfg.db_path)
+        from .runner import broker_name
+        self.j.use_broker(broker_name(cfg), cfg.market)
         self.lines: list[str] = []
         self.orders_left = 0
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
@@ -329,6 +331,12 @@ class Bot:
         candidates, quotes = [], {}
         bal = self.broker.balance()
         bot_codes = self.j.bot_codes(cfg.market)
+        parked = self.j.parked(cfg.market)
+        if parked:
+            self.say("🅿 다른 증권사에 남겨 둔 봇 종목: " + ", ".join(
+                f"{p['name'] or p['code']} {p['qty'] or '?'}주({p['broker']})" for p in parked)
+                + " — 그 증권사로 돌아오면 다시 관리해요. 지금은 매매 안 함")
+        self.paused |= {p["code"] for p in parked}
         if cfg.mode != "dry":  # 사용자가 직접 판 종목은 장부에서 정리
             for code in list(bot_codes):
                 if code not in bal.holdings:
@@ -336,7 +344,7 @@ class Bot:
                     bot_codes.pop(code)
         # 액면분할·병합: 봇 장부를 고치거나, 아직 반영 전이면 그 종목은 이번에 매매하지 않는다
         from . import corpaction
-        self.paused = corpaction.check(self.j, cfg, bal.holdings, self.say, self.notify) if cfg.mode != "dry" else set()
+        self.paused |= corpaction.check(self.j, cfg, bal.holdings, self.say, self.notify) if cfg.mode != "dry" else set()
         # 봇이 산 수량만 봇 몫으로 본다 — 같은 종목을 사용자가 따로 갖고 있어도 그 주식은 건드리지 않는다
         held = own_holdings(self.j, cfg, bal.holdings, self.say)
         for c in self.paused:

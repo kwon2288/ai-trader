@@ -87,7 +87,10 @@ def status(j, cfg, held: dict, account_cash: float | None) -> dict:
     core_inv = core.qty * core.avg_price if core else 0.0
     core_budget = budget * sg["core_pct"] / 100
     sat_budget = budget - core_budget
-    room = max(0.0, sat_budget - (invested - core_inv))
+    # 다른 증권사에 남겨 둔 봇 종목은 매입금액만큼 예산을 차지한 것으로 본다 (돌아가면 다시 관리)
+    parked = j.parked(cfg.market) if hasattr(j, "parked") else []
+    parked_cost = sum((p["qty"] or 0) * (p["avg"] or 0) for p in parked)
+    room = max(0.0, sat_budget - (invested - core_inv) - parked_cost)
     acash = None if account_cash is None or account_cash == float("inf") else float(account_cash)
     avail = room if (cfg.mode == "dry" or acash is None) else min(room, acash)
     shared = None
@@ -106,6 +109,8 @@ def status(j, cfg, held: dict, account_cash: float | None) -> dict:
             "positions": len(held), "core_pct": sg["core_pct"], "core_code": sg["core_code"] if sg["core_pct"] else None,
             "core_budget": rd(core_budget), "core_invested": rd(core_inv),
             "core_value": rd(core.qty * core.now_price) if core else 0, "sat_budget": rd(sat_budget),
+            "parked": [{"code": p["code"], "name": p["name"], "qty": p["qty"], "broker": p["broker"],
+                        "cost": rd((p["qty"] or 0) * (p["avg"] or 0))} for p in parked],
             "shared": shared}
 
 
@@ -138,7 +143,11 @@ def _room_from_journal(j, cfg) -> float:
     """다른 시장의 남은 예산 (봇 장부만으로 — 시세 조회 없이 매입금액 기준)."""
     from . import strategy
     sg = strategy.settings(cfg)
-    lots = j.bot_lots(cfg.market, cfg.ledger)
+    saved, j.broker = j.broker, None            # 다른 시장은 증권사와 상관없이 봇 종목 전체
+    try:
+        lots = j.bot_lots(cfg.market, cfg.ledger)
+    finally:
+        j.broker = saved
     invested = core_inv = 0.0
     for code, (qty, avg) in lots.items():
         v = (qty or 0) * (avg or 0)

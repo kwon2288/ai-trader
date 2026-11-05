@@ -68,6 +68,11 @@
     <span style="color:var(--acc)">■</span> 투자 중 {{ money(snap.invested, cur) }} ·
     <span style="color:var(--ok)">■</span> 살 수 있음 {{ money(snap.avail, cur) }}
     {% if short > 0 %}· <span>■</span> 계좌 현금 부족으로 못 씀 {{ money(short, cur) }}{% endif %}</div>
+  {% if snap.parked %}
+  <div class="mute" style="margin-top:6px">🅿 다른 증권사에 남겨 둔 봇 종목:
+    {% for p in snap.parked %}{{ p.name or p.code }} {{ p.qty }}주({{ p.broker }}, {{ money(p.cost, cur) }}){{ ', ' if not loop.last }}{% endfor %}
+    — 그 증권사로 돌아가면 다시 관리해요. 그동안 그 금액만큼은 예산에서 빼 두고 써요.</div>
+  {% endif %}
   {% set sh = snap.shared %}
   {% if sh %}
   <div class="mute" style="margin-top:6px">🔗 국내·미국 <b>같은 계좌</b> (증거금 공유) — 계좌 주문가능 현금 {{ money(snap.account_cash, cur) }}{% if sh.short %}이 두 시장 남은 예산 합계보다 적어 <b>{{ {'split':'남은 예산 비율대로','kr':'국내 우선으로','us':'미국 우선으로'}.get(sh.priority, '남은 예산 비율대로') }}</b> 나눠 써요:

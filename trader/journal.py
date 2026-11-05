@@ -32,6 +32,7 @@ def now() -> datetime:
 
 class Journal:
     def __init__(self, path: Path):
+        self.broker: str | None = None     # 지금 쓰는 증권사 — 정하면 봇 장부를 그 증권사 것만 본다 (use_broker)
         self.db = sqlite3.connect(path, timeout=15)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
@@ -46,7 +47,9 @@ class Journal:
                     "ALTER TABLE orders ADD COLUMN filled_qty REAL",
                     "ALTER TABLE orders ADD COLUMN fill_price REAL",
                     "ALTER TABLE orders ADD COLUMN fee REAL",
-                    "ALTER TABLE orders ADD COLUMN tax REAL"):                   # 봇 평단                    # 종목명  # 국내/미국
+                    "ALTER TABLE orders ADD COLUMN tax REAL",
+                    # 증권사별 봇 장부 (v0.22): 증권사를 바꿔도 이전 증권사에서 봇이 산 종목을 잊지 않게
+                    "ALTER TABLE bot_positions ADD COLUMN broker TEXT"):                   # 봇 평단                    # 종목명  # 국내/미국
             try:
                 self.db.execute(sql)
                 self.db.commit()
@@ -143,16 +146,36 @@ class Journal:
         return self._fill_names([dict(r) for r in rows])
 
     # 봇 보유 종목
+    def use_broker(self, broker: str, market: str) -> "Journal":
+        """이 시장을 지금 broker 로 매매한다. 증권사가 적히지 않은 예전 봇 종목은 지금 증권사 것으로 본다."""
+        self.broker = broker
+        self.db.execute("UPDATE bot_positions SET broker=? WHERE broker IS NULL AND COALESCE(market,'kr')=?",
+                        (broker, market))
+        self.db.commit()
+        return self
+
+    def _bf(self) -> tuple[str, tuple]:
+        return (" AND COALESCE(broker, ?)=?", (self.broker, self.broker)) if self.broker else ("", ())
+
+    def parked(self, market: str = "kr") -> list[dict]:
+        """다른 증권사에 남겨 둔 봇 종목 (지금 증권사로는 매매 안 함, 예산에서는 빼 둠)."""
+        if not self.broker:
+            return []
+        return [dict(r) for r in self.db.execute(
+            "SELECT code, name, qty, avg, broker FROM bot_positions WHERE COALESCE(market,'kr')=? "
+            "AND broker IS NOT NULL AND broker != ?", (market, self.broker))]
+
     def bot_codes(self, market: str = "kr") -> dict[str, str]:
+        w, a = self._bf()
         return {r["code"]: r["opened"] for r in self.db.execute(
-            "SELECT * FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))}
+            "SELECT * FROM bot_positions WHERE COALESCE(market,'kr')=?" + w, (market, *a))}
 
     def open_position(self, code: str, name: str, market: str = "kr",
                       qty: int | None = None, price: float | None = None) -> None:
         row = self.db.execute("SELECT qty, avg FROM bot_positions WHERE code=?", (code,)).fetchone()
         if row is None:
-            self.db.execute("INSERT INTO bot_positions(code,name,opened,market,qty,avg) VALUES(?,?,?,?,?,?)",
-                            (code, name, now().date().isoformat(), market, qty, price))
+            self.db.execute("INSERT INTO bot_positions(code,name,opened,market,qty,avg,broker) VALUES(?,?,?,?,?,?,?)",
+                            (code, name, now().date().isoformat(), market, qty, price, self.broker))
         elif qty and row["qty"] is not None:
             q0, a0 = row["qty"], row["avg"] or price or 0
             q1 = q0 + qty
@@ -174,8 +197,9 @@ class Journal:
     def bot_lots(self, market: str = "kr", ledger: str | None = None) -> dict[str, tuple]:
         """봇 보유 종목 → (봇 수량 또는 None, 봇 평단 또는 None).
         수량을 기록하기 전(v0.6.2 이전)에 산 종목은 주문 기록에서 봇 수량·평단을 계산해 채운다."""
+        w, a = self._bf()
         rows = [dict(r) for r in self.db.execute(
-            "SELECT code, opened, qty, avg FROM bot_positions WHERE COALESCE(market,'kr')=?", (market,))]
+            "SELECT code, opened, qty, avg FROM bot_positions WHERE COALESCE(market,'kr')=?" + w, (market, *a))]
         for r in rows:
             if r["qty"] is None and ledger:
                 q, a = self._lot_from_orders(r["code"], ledger, r["opened"])
