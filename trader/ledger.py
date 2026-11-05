@@ -109,9 +109,14 @@ def status(j, cfg, held: dict, account_cash: float | None) -> dict:
             "positions": len(held), "core_pct": sg["core_pct"], "core_code": sg["core_code"] if sg["core_pct"] else None,
             "core_budget": rd(core_budget), "core_invested": rd(core_inv),
             "core_value": rd(core.qty * core.now_price) if core else 0, "sat_budget": rd(sat_budget),
-            "parked": [{"code": p["code"], "name": p["name"], "qty": p["qty"], "broker": p["broker"],
+            "parked": [{"code": p["code"], "name": p["name"], "qty": p["qty"], "broker": _acct(p["broker"]),
                         "cost": rd((p["qty"] or 0) * (p["avg"] or 0))} for p in parked],
             "shared": shared}
+
+
+def _acct(scope):
+    from .bot import account_label
+    return account_label(scope)
 
 
 # ── 국내·미국 같은 계좌(증거금 공유) ────────────────────────────

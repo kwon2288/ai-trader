@@ -63,6 +63,15 @@ def near_close(market: str, at=None) -> int:
     return left if 0 < left <= CLOSE_WINDOW_MIN else 0
 
 
+def account_label(scope: str | None) -> str:
+    """'nh/live' → '나무 실계좌'."""
+    if not scope:
+        return "?"
+    b, _, m = scope.partition("/")
+    return " ".join(x for x in ({"nh": "나무", "kis": "한국투자", "toss": "토스"}.get(b, b),
+                                {"live": "실계좌", "mock": "모의투자", "dry": "드라이런"}.get(m, m)) if x)
+
+
 def strategy_mode(cfg) -> str:
     from . import strategy
     return strategy.settings(cfg)["signal"]
@@ -73,7 +82,7 @@ class Bot:
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
         self.j = journal or Journal(cfg.db_path)
         from .runner import broker_name
-        self.j.use_broker(broker_name(cfg), cfg.market)
+        self.j.use_broker(broker_name(cfg), cfg.market, cfg.mode)
         self.lines: list[str] = []
         self.orders_left = 0
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
@@ -334,7 +343,7 @@ class Bot:
         parked = self.j.parked(cfg.market)
         if parked:
             self.say("🅿 다른 증권사에 남겨 둔 봇 종목: " + ", ".join(
-                f"{p['name'] or p['code']} {p['qty'] or '?'}주({p['broker']})" for p in parked)
+                f"{p['name'] or p['code']} {p['qty'] or '?'}주({account_label(p['broker'])})" for p in parked)
                 + " — 그 증권사로 돌아오면 다시 관리해요. 지금은 매매 안 함")
         self.paused |= {p["code"] for p in parked}
         if cfg.mode != "dry":  # 사용자가 직접 판 종목은 장부에서 정리

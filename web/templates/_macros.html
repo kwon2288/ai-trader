@@ -32,6 +32,7 @@
   <td class="nw">{{ o.ts[5:10] }}<div class="mute">{{ o.ts[11:16] }}</div></td>
   <td class="nw act-{{ o.side }}">{{ '매수' if o.side=='BUY' else '매도' }}{% if not o.ok %} <span class="badge b-err">실패</span>{% endif %}
     {% set st = o.status %}{% if st in ('sent','open') %}<div><span class="badge b-warn">체결 대기</span></div>
+    {% elif st == 'unknown' %}<div><span class="badge b-err">확인 필요</span></div>
     {% elif st == 'partial' %}<div><span class="badge b-warn">일부 체결</span></div>
     {% elif st == 'canceled' %}<div><span class="badge">{{ '일부 체결' if o.filled_qty else '미체결 취소' }}</span></div>
     {% elif st == 'rejected' %}<div><span class="badge b-err">거부</span></div>{% endif %}</td>

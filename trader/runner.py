@@ -225,7 +225,7 @@ def close_summary(base: Config, market: str, at=None, force: bool = False) -> bo
 def refresh_balance(cfg: Config, market: str = "kr") -> dict:
     """웹의 '잔고 새로고침' — 증권사에서 바로 조회해 스냅샷 갱신 (주문 없음)."""
     cfg = market_cfg(cfg, market)
-    j = Journal(cfg.db_path).use_broker(broker_name(cfg), cfg.market)
+    j = Journal(cfg.db_path).use_broker(broker_name(cfg), cfg.market, cfg.mode)
     broker = make_broker(cfg)
     bal = broker.balance()
     from . import ledger

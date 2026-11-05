@@ -29,14 +29,28 @@ def _apply(j, cfg, o: dict, delta: float, price: float) -> None:
         j.reduce_position(o["code"], int(delta))
 
 
+def session_day(ts: str, market: str) -> str:
+    """주문 시각(한국시간 ISO) → 그 시장의 거래일. 미국은 뉴욕 날짜 (한국 23:40 주문과 다음 날 04:00 은 같은 장)."""
+    if market != "us":
+        return ts[:10]
+    from zoneinfo import ZoneInfo
+    return datetime.fromisoformat(ts).astimezone(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def market_today(market: str) -> str:
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/New_York") if market == "us" else KST
+    return datetime.now(tz).date().isoformat()
+
+
 def reconcile(j, cfg, broker, say=print, cancel_before: str | None = None, notify=None) -> int:
     """대기 중인 주문을 확인. cancel_before(ISO 시각)보다 먼저 낸 미체결 주문은 취소. 반환: 처리한 주문 수"""
     if not supported(broker) or cfg.mode == "dry":
         return 0
-    today = datetime.now(KST).date().isoformat()
+    today = market_today(cfg.market)
     n = 0
     for o in j.open_orders(cfg.ledger):
-        day = o["ts"][:10]
+        day = session_day(o["ts"], cfg.market)       # 그 시장 거래일 (미국은 뉴욕 날짜)
         try:
             f = broker.order_status(o["order_no"], o["code"], o["side"], o["qty"], o["est_price"], day)
         except Exception as e:  # noqa: BLE001
@@ -44,10 +58,20 @@ def reconcile(j, cfg, broker, say=print, cancel_before: str | None = None, notif
             continue
         prev = float(o.get("filled_qty") or 0)
         if f is None:
-            if day < today:     # 지난 주문인데 조회도 안 됨 → 다 체결된 것으로 간주 (기록 보존)
-                _apply(j, cfg, o, o["qty"] - prev, o["est_price"])
-                j.update_fill(o["rowid"], "assumed", o["qty"], o["est_price"])
-                say(f"ℹ {o['name']} 주문({day})을 증권사에서 찾지 못해 체결된 것으로 처리했어요")
+            if day < today:
+                if o["side"] == "SELL":
+                    # 지난 매도인데 조회가 안 됨 → 판 것으로 (봇이 그 종목 관리를 멈추는 쪽이라 안전)
+                    _apply(j, cfg, o, o["qty"] - prev, o["est_price"])
+                    j.update_fill(o["rowid"], "assumed", o["qty"], o["est_price"])
+                    say(f"ℹ {o['name']} 매도 주문({day})을 증권사에서 찾지 못해 체결된 것으로 처리했어요")
+                else:
+                    # 매수를 체결로 가정하면 실제로 없는 주식을 봇 몫으로 잡아 사용자 주식을 팔 수 있다 → 가정하지 않음
+                    j.update_fill(o["rowid"], "unknown", prev, None)
+                    msg = (f"⚠ {o['name']} 매수 주문({day})을 증권사에서 찾지 못했어요 — 체결 안 된 것으로 보고 "
+                           f"봇 장부에 넣지 않았어요. 실제로 샀다면 계좌에서 확인해 주세요.")
+                    say(msg)
+                    if notify:
+                        notify("orders", msg)
             continue
         _apply(j, cfg, o, f.filled - prev, f.avg_price or o["est_price"])
         state = f.state

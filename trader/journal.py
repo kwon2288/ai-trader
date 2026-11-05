@@ -146,11 +146,13 @@ class Journal:
         return self._fill_names([dict(r) for r in rows])
 
     # 봇 보유 종목
-    def use_broker(self, broker: str, market: str) -> "Journal":
-        """이 시장을 지금 broker 로 매매한다. 증권사가 적히지 않은 예전 봇 종목은 지금 증권사 것으로 본다."""
-        self.broker = broker
-        self.db.execute("UPDATE bot_positions SET broker=? WHERE broker IS NULL AND COALESCE(market,'kr')=?",
-                        (broker, market))
+    def use_broker(self, broker: str, market: str, mode: str | None = None) -> "Journal":
+        """이 시장을 지금 broker(+모의/실계좌) 계좌로 매매한다. 봇 장부는 '증권사/모드' 별로 따로.
+        계좌가 적히지 않은 예전 봇 종목(또는 v0.22.0 의 증권사만 적힌 것)은 지금 계좌 것으로 본다."""
+        scope = f"{broker}/{mode}" if mode else broker
+        self.broker = scope
+        self.db.execute("UPDATE bot_positions SET broker=? WHERE (broker IS NULL OR broker=?) AND COALESCE(market,'kr')=?",
+                        (scope, broker, market))
         self.db.commit()
         return self
 
