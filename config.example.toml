@@ -41,6 +41,9 @@ claude_model = "claude-sonnet-5-5"   # 저렴: claude-haiku-5-5
 gemini_model = "gemini-3.8-flash"    # 저렴: gemini-3.5-flash-lite
 openai_model = "gpt-6.1-sol"         # 저렴: gpt-6-luna
 max_tokens = 4000
+# 다수결에서 한 AI 가 실패(혼잡 503 등)하면 대신 물어볼 예비 AI — 추가 결제 없이 Claude 키로
+# "auto"(Claude Haiku, 이미 Haiku 를 쓰면 Sonnet) · "off" · "claude:claude-haiku-5-5" 처럼 직접 지정
+backup = "auto"
 
 # 분석 대상 = 핵심 종목(symbols, 항상 분석) + 자동 선정 종목(매일 갱신)
 # 현재가가 max_per_position_krw 보다 비싼 종목은 매수 후보에서 빠집니다.

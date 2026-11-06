@@ -59,6 +59,45 @@ def test_consensus_deadline():
         analyst.CONSENSUS_DEADLINE = old
 
 
+def test_consensus_backup_fills_in():
+    class Fail:
+        label = "Gemini(gemini-3.5-flash-lite)"
+
+        def decide(self, ctx):
+            raise RuntimeError("Gemini 오류 503: high demand")
+
+    def mk(label, act):
+        class M:
+            def __init__(self):
+                self.label = label
+
+            def decide(self, ctx):
+                return {"market_view": "ok", "_provider": label, "_usage": None,
+                        "decisions": [{"code": "000001", "action": act, "amount_krw": 40_000, "confidence": 0.8, "sell_ratio": 1.0,
+                                       "reason": "r"}]}
+        return M()
+    c = analyst.ConsensusAnalyst([mk("Claude(claude-sonnet-5-5)", "BUY"), Fail()],
+                                 backup=mk("Claude(claude-haiku-5-5)", "BUY"))
+    out = c.decide({})
+    assert out["decisions"][0]["action"] == "BUY"                        # 예비 덕에 다수결 유지 → 매수 가능
+    assert "Claude 예비" in out["_provider"] and any(t.startswith("예비 Claude") for t in c.timings)
+    c2 = analyst.ConsensusAnalyst([mk("Claude(claude-sonnet-5-5)", "BUY"), Fail()])
+    assert c2.decide({})["decisions"][0]["action"] == "HOLD"             # 예비 없으면 예전처럼 매수 보류
+
+    class Cfg:
+        ai_backup = "auto"
+        ai_models = {"claude": "claude-haiku-5-5"}
+        ai_max_tokens = 100
+    import os
+    os.environ["ANTHROPIC_API_KEY"] = "x"
+    b = analyst._backup(Cfg)
+    assert b is not None and b.model == "claude-sonnet-5-5"               # 이미 Haiku 면 Sonnet
+    Cfg.ai_models = {"claude": "claude-sonnet-5-5"}
+    assert analyst._backup(Cfg).model == "claude-haiku-5-5"
+    Cfg.ai_backup = "off"
+    assert analyst._backup(Cfg) is None
+
+
 def test_web_busy_info_and_stop():
     os.environ.update(TRADER_DATA_DIR=tempfile.mkdtemp(), WEB_PASSWORD="secret-pass")
     import fcntl

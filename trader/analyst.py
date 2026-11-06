@@ -350,10 +350,11 @@ class ConsensusAnalyst:
     """키가 있는 AI 들에게 모두 묻고 다수결. 2개 이상 응답해야 판단을 낸다."""
     name = "consensus"
 
-    def __init__(self, members: list):
+    def __init__(self, members: list, backup=None):
         if len(members) < 2:
             raise RuntimeError("다수결 모드는 AI 키가 2개 이상 필요합니다 (ANTHROPIC/GEMINI/OPENAI_API_KEY)")
         self.members = members
+        self.backup = backup          # 멤버가 실패하면 대신 한 번 물어볼 예비 AI (없으면 None)
         self.label = "다수결(" + ", ".join(m.label for m in members) + ")"
         self.errors: list[str] = []
 
@@ -388,6 +389,17 @@ class ConsensusAnalyst:
                 self.errors.append(f"{m.label}: {e}")
                 self.timings.append(f"{short} 실패({round(took.get(id(m), 0))}초)")
         ex.shutdown(wait=False, cancel_futures=True)     # 늦은 AI 는 기다리지 않음
+        if self.backup is not None and len(results) < len(self.members) and len(results) >= 1:
+            # 실패한 멤버 대신 예비 AI 에게 한 번 — 다수결(2개 이상 응답)을 유지
+            t = time.monotonic()
+            try:
+                r = self.backup.decide(ctx)
+                r["_provider"] = self.backup.label.replace("(", " 예비(", 1)       # 'Claude 예비(claude-haiku-5-5)'
+                results.append(r)
+                self.timings.append(f"예비 {self.backup.label.split('(')[0]} {round(time.monotonic() - t)}초")
+            except Exception as e:  # noqa: BLE001
+                self.errors.append(f"예비 {self.backup.label}: {e}")
+                self.timings.append(f"예비 {self.backup.label.split('(')[0]} 실패({round(time.monotonic() - t)}초)")
         if not results:
             raise RuntimeError("모든 AI 가 응답하지 않았습니다 → " + "; ".join(self.errors))
         if len(results) < 2:
@@ -419,6 +431,27 @@ def available(provider: str) -> bool:
     return bool(os.environ.get(p["env"]) or (provider == "gemini" and os.environ.get("GOOGLE_API_KEY")))
 
 
+BACKUP_DEFAULT = "claude-haiku-5-5"
+
+
+def _backup(cfg):
+    """다수결 예비 AI. auto = Claude 키가 있으면 Claude 저렴 모델(이미 그 모델을 쓰고 있으면 Sonnet).
+    "off" = 없음, "claude:모델명" 처럼 직접 지정 가능."""
+    v = (getattr(cfg, "ai_backup", "auto") or "auto").strip()
+    if v.lower() in ("off", "none", "false", ""):
+        return None
+    if v.lower() == "auto":
+        if not available("claude"):
+            return None
+        main = cfg.ai_models.get("claude", "")
+        return ClaudeAnalyst(BACKUP_DEFAULT if main != BACKUP_DEFAULT else "claude-sonnet-5-5", cfg.ai_max_tokens)
+    prov, _, model = v.partition(":")
+    prov = prov.strip().lower()
+    if prov not in _CLASSES or not available(prov):
+        return None
+    return _CLASSES[prov](model.strip() or cfg.ai_models.get(prov), cfg.ai_max_tokens)
+
+
 def make_analyst(cfg):
     prov = cfg.ai_provider
     if prov == "rules":
@@ -426,7 +459,7 @@ def make_analyst(cfg):
         return RulesAnalyst()
     if prov == "consensus":
         members = [_CLASSES[p](cfg.ai_models[p], cfg.ai_max_tokens) for p in PROVIDERS if available(p)]
-        return ConsensusAnalyst(members)
+        return ConsensusAnalyst(members, _backup(cfg))
     if prov not in _CLASSES:
         raise RuntimeError(f"알 수 없는 AI: {prov} (claude/gemini/openai/consensus/rules)")
     if not available(prov):

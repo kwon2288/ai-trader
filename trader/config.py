@@ -48,6 +48,7 @@ class Config:
     auto_scan_pool: int = 200          # 시총 상위 몇 개를 시세 조회할지
     ai_hybrid: bool = False            # 규칙으로 먼저 거르고 신호 난 종목만 AI 확인 (토큰 절약)
     ai_news: bool = False              # AI 에 최근 뉴스 제목·공시를 함께 보냄
+    ai_backup: str = "auto"            # 다수결에서 한 AI 가 실패하면 대신 물어볼 예비 AI ("auto" | "off" | "claude:모델")
     market: str = "kr"                 # kr | us — 시장마다 예산·장부·손실한도가 따로
     currency: str = "KRW"
     us: dict = field(default_factory=dict)   # [us] 섹션 원본
@@ -184,6 +185,7 @@ def load(config_path: Path | None = None) -> Config:
             "openai": a.get("openai_model") or "gpt-6.1-sol",
         },
         ai_max_tokens=int(a.get("max_tokens", 4000)),
+        ai_backup=str(a.get("backup", "auto")).strip(),
         ai_hybrid=bool(a.get("hybrid", True)),
         ai_news=bool(a.get("news", False)),
         symbols=[norm_symbol(s, "kr") for s in raw["universe"]["symbols"]],
