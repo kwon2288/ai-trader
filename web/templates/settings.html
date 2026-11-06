@@ -34,6 +34,17 @@
       <span class="mute" style="display:block">AI에게 넘기는 종목마다 최근 3일 뉴스 제목(구글 뉴스)과 최근 7일 공시 제목(DART, 국내 · 키 필요)을 붙여요.
         종목당 토큰이 조금 늘고(제목만 보냄), 실행이 몇 초 길어져요. DART 키는 연결 정보 → AI API 키에서.</span></span>
   </label>
+  {% set bk = c.ai_backup or 'auto' %}
+  {% set bk_opts = [('auto', 'Claude 저렴 모델 (Haiku · 이미 Haiku 면 Sonnet)', keys.claude),
+                    ('openai:gpt-6-luna', 'OpenAI gpt-6-luna (다른 회사 모델 — 추천)', keys.openai),
+                    ('claude:claude-haiku-5-5', 'Claude Haiku', keys.claude),
+                    ('gemini:gemini-3.5-flash-lite', 'Gemini Flash-Lite', keys.gemini),
+                    ('off', '끔 — 실패하면 그 회차는 매수 보류', True)] %}
+  <label for="backup" style="margin-top:12px">다수결 예비 AI — 한 AI 가 실패(혼잡 503 등)하면 그 회차에만 대신 물어봄</label>
+  <select id="backup" name="backup">
+    {% for v, d, ok in bk_opts %}<option value="{{ v }}" {{ 'selected' if bk == v }}>{{ d }}{{ '' if ok else ' — 키 없음' }}</option>{% endfor %}
+    {% if bk not in bk_opts|map(attribute=0)|list %}<option value="{{ bk }}" selected>{{ bk }} (현재 설정)</option>{% endif %}
+  </select>
   <div class="mute" style="margin-top:6px">
     API 키: {% for k, v in key_labels.items() %}{{ v }} {{ '✅' if keys[k] else '❌' }}{{ ' · ' if not loop.last }}{% endfor %}
     — 키는 서버 <code>.env</code> 에서만 넣을 수 있어요.

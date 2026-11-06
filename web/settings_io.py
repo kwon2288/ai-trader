@@ -185,6 +185,9 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     text = _set(text, "ai", "provider", provider)
     text = _set(text, "ai", "hybrid", form.get("hybrid") == "on")
     text = _set(text, "ai", "news", form.get("news") == "on")
+    bk = (form.get("backup") or "auto").strip()
+    if bk in ("auto", "off") or re.fullmatch(r"(claude|gemini|openai):[A-Za-z0-9._-]{1,60}", bk):
+        text = _set(text, "ai", "backup", bk)
     for key, m in models.items():
         text = _set(text, "ai", key, m)
     # 예전 설정의 model 키 제거 (claude_model 로 대체)

@@ -389,7 +389,7 @@ class ConsensusAnalyst:
                 self.errors.append(f"{m.label}: {e}")
                 self.timings.append(f"{short} 실패({round(took.get(id(m), 0))}초)")
         ex.shutdown(wait=False, cancel_futures=True)     # 늦은 AI 는 기다리지 않음
-        if self.backup is not None and len(results) < len(self.members) and len(results) >= 1:
+        if self.backup is not None and len(results) == 1:      # 응답이 1개뿐일 때만 (3개 중 1개 실패면 2개로 충분)
             # 실패한 멤버 대신 예비 AI 에게 한 번 — 다수결(2개 이상 응답)을 유지
             t = time.monotonic()
             try:

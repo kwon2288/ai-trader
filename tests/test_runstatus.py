@@ -81,6 +81,12 @@ def test_consensus_backup_fills_in():
     out = c.decide({})
     assert out["decisions"][0]["action"] == "BUY"                        # 예비 덕에 다수결 유지 → 매수 가능
     assert "Claude 예비" in out["_provider"] and any(t.startswith("예비 Claude") for t in c.timings)
+    calls = []
+    bk = mk("Claude(claude-haiku-5-5)", "BUY")
+    orig = bk.decide
+    bk.decide = lambda ctx: (calls.append(1), orig(ctx))[1]
+    analyst.ConsensusAnalyst([mk("Claude(x)", "BUY"), mk("OpenAI(y)", "BUY"), Fail()], backup=bk).decide({})
+    assert calls == []                                                  # 3개 중 1개 실패 → 2개로 충분, 예비 안 부름
     c2 = analyst.ConsensusAnalyst([mk("Claude(claude-sonnet-5-5)", "BUY"), Fail()])
     assert c2.decide({})["decisions"][0]["action"] == "HOLD"             # 예비 없으면 예전처럼 매수 보류
 
