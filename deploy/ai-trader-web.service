@@ -8,6 +8,7 @@ WorkingDirectory=/opt/ai-trader
 ExecStart=/opt/ai-trader/.venv/bin/python -m web.app
 Restart=on-failure
 RestartSec=5
+LimitNOFILE=8192
 
 [Install]
 WantedBy=multi-user.target

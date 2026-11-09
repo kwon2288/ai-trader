@@ -56,6 +56,26 @@ class Journal:
             except sqlite3.OperationalError:
                 pass
 
+    # Python 3.13+ 의 sqlite3 연결은 참조가 사라져도 GC 가 돌 때까지 닫히지 않는다 →
+    # 웹처럼 요청마다 Journal 을 만들면 파일 핸들이 쌓여 'Too many open files' 가 난다. 바로 닫는다.
+    def close(self) -> None:
+        db = getattr(self, "db", None)
+        if db is not None:
+            try:
+                db.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self.db = None
+
+    def __del__(self):
+        self.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
     # 상태
     def get(self, key: str, default: str | None = None) -> str | None:
         row = self.db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
