@@ -1,11 +1,12 @@
 {% macro won(v) %}{{ "{:,}".format(v|int) }}원{% endmacro %}
 {% macro money(v, cur='KRW') %}{% if cur == 'USD' %}${{ "{:,.2f}".format(v|float) }}{% else %}{{ "{:,}".format(v|int) }}원{% endif %}{% endmacro %}
 {% macro num(v, cur='KRW') %}{% if cur == 'USD' %}{{ "{:,.2f}".format(v|float) }}{% else %}{{ "{:,}".format(v|int) }}{% endif %}{% endmacro %}
-{% macro market_tabs(base, market, endpoint) %}
+{% macro market_tabs(base, market, endpoint, all_tab=False) %}
 {% if base.us_enabled %}
 <div class="tabs">
   <a href="{{ url_for(endpoint, m='kr') }}" class="{{ 'on' if market == 'kr' }}">🇰🇷 국내</a>
   <a href="{{ url_for(endpoint, m='us') }}" class="{{ 'on' if market == 'us' }}">🇺🇸 미국</a>
+  {% if all_tab %}<a href="{{ url_for(endpoint, m='all') }}" class="{{ 'on' if market == 'all' }}">🌐 통합</a>{% endif %}
 </div>
 {% endif %}
 {% endmacro %}

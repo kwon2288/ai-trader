@@ -2,7 +2,7 @@
 {% from "_macros.html" import money, num, pct, market_tabs %}
 {% block title %}손익 · AI 자동매매{% endblock %}
 {% block body %}
-{{ market_tabs(base, market, 'pnl') }}
+{{ market_tabs(base, market, 'pnl', True) }}
 {% set cur = c.currency %}
 <div class="card">
   <h2>기간별 손익 <a href="{{ url_for('backtest_page') }}" style="font-size:13px;font-weight:normal;float:right">🧪 백테스트 →</a></h2>
@@ -19,6 +19,11 @@
   </form>
   {% endif %}
   <div class="mute">{{ start.isoformat() if start else '처음' }} ~ {{ end.isoformat() if end else '오늘' }}</div>
+  {% if market == 'all' %}
+  <div class="mute" style="margin-top:4px">🌐 국내 + 미국 합계 (원화) — 국내 {{ ('+' if split.kr > 0 else '') ~ money(split.kr) }}
+    · 미국 {{ ('+' if split.us > 0 else '') ~ money(split.us, 'USD') }} (≈ {{ money(split.us_krw) }}).
+    미국 금액은 최근 환율 {{ "{:,.0f}".format(fx) }}원으로 환산했어요.</div>
+  {% endif %}
   <div class="stats" style="margin-top:8px">
     <div class="stat"><div class="k">실현 손익</div><div class="v"><span class="{{ 'up' if r.pnl > 0 else ('down' if r.pnl < 0 else '') }}">{{ ('+' if r.pnl > 0 else '') ~ money(r.pnl, cur) }}</span></div>
       {% if snap and snap.budget %}<div class="mute">예산 대비 {{ "%+.2f"|format(r.pnl / snap.budget * 100) }}%</div>{% endif %}
@@ -75,7 +80,8 @@
     {% for tr in r.trades %}
     <tr><td class="nw">{{ tr.ts[5:10] }}<div class="mute">{{ tr.ts[11:16] }}</div></td>
       <td>{{ tr.name }}<div class="mute">{{ tr.code }}</div></td><td class="r">{{ tr.qty }}</td>
-      <td class="r nw">{{ num(tr.avg, cur) }}<div class="mute">→ {{ num(tr.price, cur) }}</div></td>
+      {% if tr.cur == 'USD' and market == 'all' %}<td class="r nw">{{ money(tr.avg, 'USD') }}<div class="mute">→ {{ money(tr.price, 'USD') }}</div></td>
+      {% else %}<td class="r nw">{{ num(tr.avg, cur) }}<div class="mute">→ {{ num(tr.price, cur) }}</div></td>{% endif %}
       <td class="r nw">{{ pct(tr.pnl_pct) }}<div class="mute">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div>
         <div class="mute" style="font-size:11px">비용 {{ num(tr.cost, cur) }}</div></td></tr>
     {% endfor %}
