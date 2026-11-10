@@ -206,7 +206,7 @@ def close_summary(base: Config, market: str, at=None, force: bool = False) -> bo
         pass
     snap = j.snapshot(cfg.ledger) or {}
     today = ledger.period(j, cfg.ledger, now.date(), now.date(), ledger.costs_of(cfg))
-    ai = pricing.ai_cost(j, cfg.data_dir, cfg.ledger, start.astimezone(KST).date())
+    ai = pricing.ai_cost(j, cfg.data_dir, cfg.ledger, start.astimezone(KST))      # 그 시장 하루(미국은 뉴욕 0시부터)
     flag = {"kr": "🇰🇷 국내", "us": "🇺🇸 미국"}.get(market, "")
     lines = [f"📊 {flag} 오늘 마감 요약 ({now:%m/%d})",
              f"오늘 주문: 매수 {today['buys']}건 · 매도 {today['n']}건",

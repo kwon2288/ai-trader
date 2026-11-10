@@ -41,6 +41,18 @@ def _eff(o: dict) -> tuple[float, float]:
     return float(o.get("filled_qty") or 0), float(o.get("fill_price") or o["est_price"])
 
 
+def day_of(ts: str, ledger: str) -> str:
+    """주문 시각(한국시간) → 그 시장 거래일. 미국 장부는 뉴욕 날짜 (한국 00:30 매도 = 뉴욕 전날 장)."""
+    if not ledger.endswith("_us"):
+        return ts[:10]
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    try:
+        return datetime.fromisoformat(ts).astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    except ValueError:
+        return ts[:10]
+
+
 def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
     """봇의 매도 체결마다 실현 손익 (주문 기록을 처음부터 평균단가로 계산, 수수료·세금 차감)."""
     costs = costs or DEFAULT_COSTS
@@ -61,7 +73,7 @@ def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
         avg = c / q if q else px                       # 기록 없는 매도(예전 데이터)는 손익 0 으로
         sold = min(qty, q) if q else qty
         pnl = (px - avg) * sold - ft
-        out.append({"ts": o["ts"], "date": o["ts"][:10], "code": o["code"], "name": o["name"], "qty": sold,
+        out.append({"ts": o["ts"], "date": day_of(o["ts"], ledger), "code": o["code"], "name": o["name"], "qty": sold,
                     "price": px, "avg": round(avg, 4), "pnl": round(pnl, 2), "cost": round(ft, 2),
                     "pnl_pct": round(((px * sold - ft) / (avg * sold) - 1) * 100, 2) if avg else 0.0})
         nq = max(0, q - sold)
@@ -219,12 +231,16 @@ def period(j, ledger: str, start: date | None, end: date | None, costs: dict | N
     by_day: dict[str, float] = {}
     for t in ts:
         by_day[t["date"]] = by_day.get(t["date"], 0.0) + t["pnl"]
-    buys = j.db.execute(
-        "SELECT COUNT(*) n, COALESCE(SUM(COALESCE(filled_qty, qty)*COALESCE(fill_price, est_price)),0) amt "
-        "FROM orders WHERE ok=1 AND mode=? AND side='BUY' AND COALESCE(status,'') NOT IN ('failed') "
-        "AND COALESCE(order_no,'') != 'DRY' AND (? IS NULL OR substr(ts,1,10) >= ?) AND (? IS NULL OR substr(ts,1,10) <= ?)",
-        (ledger, start and start.isoformat(), start and start.isoformat(),
-         end and end.isoformat(), end and end.isoformat())).fetchone()
+    s_iso, e_iso = start and start.isoformat(), end and end.isoformat()
+    buys = {"n": 0, "amt": 0.0}
+    for o_ts, amt in j.db.execute(
+            "SELECT ts, COALESCE(filled_qty, qty)*COALESCE(fill_price, est_price) FROM orders "
+            "WHERE ok=1 AND mode=? AND side='BUY' AND COALESCE(status,'') NOT IN ('failed') "
+            "AND COALESCE(order_no,'') != 'DRY'", (ledger,)):
+        d = day_of(o_ts, ledger)
+        if (s_iso is None or d >= s_iso) and (e_iso is None or d <= e_iso):
+            buys["n"] += 1
+            buys["amt"] += amt or 0
     return {"trades": list(reversed(ts)), "pnl": round(sum(t["pnl"] for t in ts), 2), "n": len(ts),
             "costs": round(sum(t["cost"] for t in ts), 2),
             "wins": len(wins), "win_rate": round(len(wins) / len(ts) * 100, 1) if ts else None,

@@ -34,6 +34,22 @@ def test_combine_converts_us_to_krw():
     assert sum(v for _, v in r["by_day"]) == 34_000
 
 
+def test_us_day_is_new_york_date():
+    """한국 11/11 00:30 매도 = 뉴욕 11/10 장 → 미국 11/10 마감 요약·기간 손익에 들어가야 한다."""
+    from datetime import date
+    j = Journal(Path(tempfile.mkdtemp()) / "j.db")
+    z = {"kr_fee_pct": 0, "kr_sell_tax_pct": 0, "us_fee_pct": 0}
+    for ts, side, px in (("2026-11-06T00:30:00+09:00", "BUY", 92.7), ("2026-11-11T00:30:00+09:00", "SELL", 96.19)):
+        j.db.execute("INSERT INTO orders(ts,mode,side,code,name,qty,est_price,order_no,ok,message,trigger,status,"
+                     "filled_qty,fill_price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (ts, "mock_us", side, "KO", "코카콜라", 1, px, "X", 1, "", "t", "filled", 1, px))
+    j.db.commit()
+    r = ledger.period(j, "mock_us", date(2026, 11, 10), date(2026, 11, 10), z)
+    assert r["n"] == 1 and abs(r["pnl"] - 3.49) < 0.01
+    assert ledger.period(j, "mock_us", date(2026, 11, 11), date(2026, 11, 11), z)["n"] == 0
+    assert ledger.period(j, "mock_us", date(2026, 11, 5), date(2026, 11, 5), z)["buys"] == 1   # 한국 11/6 00:30 = 뉴욕 11/5
+
+
 def test_page_has_all_tab():
     from trader import config as cfgmod
     from web import app as webapp
