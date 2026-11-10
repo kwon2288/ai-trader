@@ -22,7 +22,8 @@
   {% if market == 'all' %}
   <div class="mute" style="margin-top:4px">🌐 국내 + 미국 합계 (원화) — 국내 {{ ('+' if split.kr > 0 else '') ~ money(split.kr) }}
     · 미국 {{ ('+' if split.us > 0 else '') ~ money(split.us, 'USD') }} (≈ {{ money(split.us_krw) }}).
-    미국 금액은 최근 환율 {{ "{:,.0f}".format(fx) }}원으로 환산했어요.</div>
+    미국 실현 손익은 <b>거래 당시 환율</b>로 계산해 환차손익까지 들어가요 (매수 때 낸 원화 → 매도 때 받은 원화).
+    보유 종목 평가·AI 비용은 최근 환율 {{ "{:,.0f}".format(fx) }}원.</div>
   {% endif %}
   <div class="stats" style="margin-top:8px">
     <div class="stat"><div class="k">실현 손익</div><div class="v"><span class="{{ 'up' if r.pnl > 0 else ('down' if r.pnl < 0 else '') }}">{{ ('+' if r.pnl > 0 else '') ~ money(r.pnl, cur) }}</span></div>
@@ -83,6 +84,7 @@
       {% if tr.cur == 'USD' and market == 'all' %}<td class="r nw">{{ money(tr.avg, 'USD') }}<div class="mute">→ {{ money(tr.price, 'USD') }}</div></td>
       {% else %}<td class="r nw">{{ num(tr.avg, cur) }}<div class="mute">→ {{ num(tr.price, cur) }}</div></td>{% endif %}
       <td class="r nw">{{ pct(tr.pnl_pct) }}<div class="mute">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div>
+        {% if tr.cur == 'USD' and market == 'all' %}<div class="mute" style="font-size:11px">{{ money(tr.pnl_native, 'USD') }} · 환율 {{ "{:,.0f}".format(tr.fx) }}</div>{% endif %}
         <div class="mute" style="font-size:11px">비용 {{ num(tr.cost, cur) }}</div></td></tr>
     {% endfor %}
   </table></div>

@@ -49,7 +49,9 @@ class Journal:
                     "ALTER TABLE orders ADD COLUMN fee REAL",
                     "ALTER TABLE orders ADD COLUMN tax REAL",
                     # 증권사별 봇 장부 (v0.22): 증권사를 바꿔도 이전 증권사에서 봇이 산 종목을 잊지 않게
-                    "ALTER TABLE bot_positions ADD COLUMN broker TEXT"):                   # 봇 평단                    # 종목명  # 국내/미국
+                    "ALTER TABLE bot_positions ADD COLUMN broker TEXT",
+                    # 주문 당시 환율 (v0.25): 미국 손익을 원화로 볼 때 그때 환율로
+                    "ALTER TABLE orders ADD COLUMN fx REAL"):                   # 봇 평단                    # 종목명  # 국내/미국
             try:
                 self.db.execute(sql)
                 self.db.commit()
@@ -132,11 +134,17 @@ class Journal:
         if status is None:
             status = "failed" if not res.ok else ("filled" if res.order_no == "DRY" else "sent")
         filled = qty if status == "filled" else 0
+        fx = None
+        if str(mode).endswith("_us"):                  # 미국 주문은 당시 환율(봇이 실행 시작 때 증권사에서 받은 값)을 같이 남김
+            try:
+                fx = float(self.get("fx_usdkrw") or 0) or None
+            except ValueError:
+                fx = None
         cur = self.db.execute(
             "INSERT INTO orders(ts,mode,side,code,name,qty,est_price,order_no,ok,message,trigger,status,filled_qty,"
-            "fill_price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+            "fill_price,fx) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 now().isoformat(timespec="seconds"), mode, side, code, name, qty, est_price,
-                res.order_no, int(res.ok), res.message, trigger, status, filled, est_price if filled else None))
+                res.order_no, int(res.ok), res.message, trigger, status, filled, est_price if filled else None, fx))
         self.db.commit()
         return cur.lastrowid
 

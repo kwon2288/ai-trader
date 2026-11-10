@@ -103,28 +103,28 @@ def _compare_bench(c, j, start, end) -> dict | None:
     return out
 
 
-def combine(parts: list[tuple[dict, float, str]]) -> dict:
-    """시장별 기간 손익(ledger.period)을 원화로 합친다. parts: [(r, 원화 환산 배율, 통화)]"""
+def combine(parts: list[tuple[dict, str]]) -> dict:
+    """시장별 기간 손익(ledger.period)을 원화로 합친다. parts: [(r, 통화)]
+    미국 거래는 거래마다 당시 환율로 계산한 원화 손익(pnl_krw — 환차손익 포함)을 쓴다."""
     trades, by_code, by_day = [], {}, {}
-    pnl = costs = buy_amt = 0.0
-    n = wins = buys = 0
-    for r, k, cur in parts:
+    buy_amt = 0.0
+    buys = 0
+    for r, cur in parts:
         for tr in r["trades"]:
-            trades.append({**tr, "pnl": round(tr["pnl"] * k), "cost": round(tr["cost"] * k), "cur": cur})
-        for b in r["by_code"]:
-            g = by_code.setdefault(b["code"], {**b, "pnl": 0.0, "n": 0})
-            g["pnl"] += b["pnl"] * k
-            g["n"] += b["n"]
-        for d, v in r["by_day"]:
-            by_day[d] = by_day.get(d, 0.0) + v * k
-        pnl += r["pnl"] * k
-        costs += r["costs"] * k
-        buy_amt += (r["buy_amount"] or 0) * k
-        n += r["n"]
-        wins += r["wins"]
+            t = {**tr, "pnl": tr["pnl_krw"], "cost": tr["cost_krw"], "cur": cur,
+                 "pnl_native": tr["pnl"]}
+            trades.append(t)
+            g = by_code.setdefault(t["code"], {"code": t["code"], "name": t["name"], "pnl": 0.0, "n": 0})
+            g["pnl"] += t["pnl"]
+            g["n"] += 1
+            by_day[t["date"]] = by_day.get(t["date"], 0.0) + t["pnl"]
+        buy_amt += r.get("buy_amount_krw", r["buy_amount"]) or 0
         buys += r["buys"]
     trades.sort(key=lambda t: t["ts"], reverse=True)
-    return {"trades": trades, "pnl": round(pnl), "n": n, "costs": round(costs), "wins": wins,
+    n = len(trades)
+    wins = sum(1 for t in trades if t["pnl"] > 0)
+    return {"trades": trades, "pnl": round(sum(t["pnl"] for t in trades)), "n": n,
+            "costs": round(sum(t["cost"] for t in trades)), "wins": wins,
             "win_rate": round(wins / n * 100, 1) if n else None,
             "best": max(trades, key=lambda t: t["pnl"]) if trades else None,
             "worst": min(trades, key=lambda t: t["pnl"]) if trades else None,
@@ -133,7 +133,7 @@ def combine(parts: list[tuple[dict, float, str]]) -> dict:
 
 
 def _pnl_all(base, p, f, t, start, end):
-    """국내 + 미국 통합 (원화). 미국 금액은 최근 환율로 환산."""
+    """국내 + 미국 통합 (원화). 미국 실현 손익은 거래 당시 환율, 보유 평가·AI 비용은 최근 환율로 환산."""
     from trader import ledger, pricing
     kr, us = base.for_market("kr"), base.for_market("us")
     j = Journal(kr.db_path)
@@ -141,7 +141,7 @@ def _pnl_all(base, p, f, t, start, end):
     r_kr = ledger.period(j, kr.ledger, start, end, ledger.costs_of(kr))
     j_us = Journal(us.db_path)
     r_us = ledger.period(j_us, us.ledger, start, end, ledger.costs_of(us))
-    r = combine([(r_kr, 1.0, "KRW"), (r_us, fx, "USD")])
+    r = combine([(r_kr, "KRW"), (r_us, "USD")])
     days = r["by_day"]
     monthly = len(days) > 45
     if monthly:
@@ -158,7 +158,8 @@ def _pnl_all(base, p, f, t, start, end):
     if sk.get("budget") is not None or su.get("budget") is not None:
         snap = {k: float(sk.get(k) or 0) + float(su.get(k) or 0) * fx for k in ("budget", "unrealized", "pnl")}
         snap["pnl_pct"] = snap["pnl"] / snap["budget"] * 100 if snap["budget"] else 0.0
-    split = {"kr": r_kr["pnl"], "us": r_us["pnl"], "us_krw": round(r_us["pnl"] * fx)}
+    split = {"kr": r_kr["pnl"], "us": r_us["pnl"], "us_krw": r_us["pnl_krw"],
+             "fx_gain": r_us["pnl_krw"] - round(r_us["pnl"] * fx)}
     return render_template("pnl.html", c=kr, base=base, market="all", r=r, periods=PERIODS, p=p, cmp=None, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
                            snap=snap, split=split, fx=fx)

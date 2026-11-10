@@ -56,8 +56,13 @@ def day_of(ts: str, ledger: str) -> str:
 def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
     """봇의 매도 체결마다 실현 손익 (주문 기록을 처음부터 평균단가로 계산, 수수료·세금 차감)."""
     costs = costs or DEFAULT_COSTS
-    pos: dict[str, list] = {}           # code → [qty, cost(수수료 포함)]
+    pos: dict[str, list] = {}           # code → [qty, cost(수수료 포함), 원화 원가(미국: 매수 당시 환율)]
     out = []
+    us = ledger.endswith("_us")
+    try:
+        fx_now = float(j.get("fx_usdkrw") or 0) or 1400.0 if us else 1.0
+    except ValueError:
+        fx_now = 1400.0
     for o in j.db.execute(
             "SELECT * FROM orders WHERE ok=1 AND mode=? AND COALESCE(order_no,'') != 'DRY' "
             "AND COALESCE(status,'') != 'failed' ORDER BY ts, rowid", (ledger,)):
@@ -66,18 +71,22 @@ def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
         if qty <= 0:
             continue
         ft = fee_tax(o, qty, px, costs, ledger)
-        q, c = pos.get(o["code"], [0, 0.0])
+        fx = (o.get("fx") or fx_now) if us else 1.0    # 환율 기록 이전 주문은 최근 환율로
+        q, c, ck = pos.get(o["code"], [0, 0.0, 0.0])
         if o["side"] == "BUY":
-            pos[o["code"]] = [q + qty, c + qty * px + ft]
+            pos[o["code"]] = [q + qty, c + qty * px + ft, ck + (qty * px + ft) * fx]
             continue
         avg = c / q if q else px                       # 기록 없는 매도(예전 데이터)는 손익 0 으로
+        avg_k = ck / q if q else px * fx
         sold = min(qty, q) if q else qty
         pnl = (px - avg) * sold - ft
-        out.append({"ts": o["ts"], "date": day_of(o["ts"], ledger), "code": o["code"], "name": o["name"], "qty": sold,
+        pnl_krw = (px * sold - ft) * fx - avg_k * sold    # 원화 손익 = 매도 당시 환율 원화 − 매수 당시 환율 원가 (환차손익 포함)
+        out.append({"ts": o["ts"], "date": day_of(o["ts"], ledger), "fx": fx if us else None,
+                    "pnl_krw": round(pnl_krw), "cost_krw": round(ft * fx), "code": o["code"], "name": o["name"], "qty": sold,
                     "price": px, "avg": round(avg, 4), "pnl": round(pnl, 2), "cost": round(ft, 2),
                     "pnl_pct": round(((px * sold - ft) / (avg * sold) - 1) * 100, 2) if avg else 0.0})
         nq = max(0, q - sold)
-        pos[o["code"]] = [nq, avg * nq]
+        pos[o["code"]] = [nq, avg * nq, avg_k * nq]
     return out
 
 
@@ -232,19 +241,26 @@ def period(j, ledger: str, start: date | None, end: date | None, costs: dict | N
     for t in ts:
         by_day[t["date"]] = by_day.get(t["date"], 0.0) + t["pnl"]
     s_iso, e_iso = start and start.isoformat(), end and end.isoformat()
-    buys = {"n": 0, "amt": 0.0}
-    for o_ts, amt in j.db.execute(
-            "SELECT ts, COALESCE(filled_qty, qty)*COALESCE(fill_price, est_price) FROM orders "
+    buys = {"n": 0, "amt": 0.0, "amt_krw": 0.0}
+    try:
+        fx_now = float(j.get("fx_usdkrw") or 0) or 1400.0 if ledger.endswith("_us") else 1.0
+    except ValueError:
+        fx_now = 1400.0
+    for o_ts, amt, o_fx in j.db.execute(
+            "SELECT ts, COALESCE(filled_qty, qty)*COALESCE(fill_price, est_price), fx FROM orders "
             "WHERE ok=1 AND mode=? AND side='BUY' AND COALESCE(status,'') NOT IN ('failed') "
             "AND COALESCE(order_no,'') != 'DRY'", (ledger,)):
         d = day_of(o_ts, ledger)
         if (s_iso is None or d >= s_iso) and (e_iso is None or d <= e_iso):
             buys["n"] += 1
             buys["amt"] += amt or 0
+            buys["amt_krw"] += (amt or 0) * ((o_fx or fx_now) if ledger.endswith("_us") else 1.0)
     return {"trades": list(reversed(ts)), "pnl": round(sum(t["pnl"] for t in ts), 2), "n": len(ts),
             "costs": round(sum(t["cost"] for t in ts), 2),
             "wins": len(wins), "win_rate": round(len(wins) / len(ts) * 100, 1) if ts else None,
             "best": max(ts, key=lambda t: t["pnl"]) if ts else None,
             "worst": min(ts, key=lambda t: t["pnl"]) if ts else None,
             "by_code": sorted(by_code.values(), key=lambda b: -b["pnl"]),
-            "by_day": sorted(by_day.items()), "buys": buys["n"], "buy_amount": buys["amt"]}
+            "by_day": sorted(by_day.items()), "buys": buys["n"], "buy_amount": buys["amt"],
+            "buy_amount_krw": round(buys["amt_krw"]), "pnl_krw": sum(t["pnl_krw"] for t in ts),
+            "costs_krw": sum(t["cost_krw"] for t in ts)}
