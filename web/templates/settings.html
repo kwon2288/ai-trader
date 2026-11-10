@@ -117,7 +117,9 @@
         <option value="split" {{ 'selected' if sp == 'split' }}>균등 — 남은 예산 비율대로 나눔</option>
         <option value="kr" {{ 'selected' if sp == 'kr' }}>국내 우선 — 국내 예산부터 채우고 남는 만큼 미국</option>
         <option value="us" {{ 'selected' if sp == 'us' }}>미국 우선 — 미국 예산부터 채우고 남는 만큼 국내</option>
-      </select></div>
+        <option value="session" {{ 'selected' if sp == 'session' }}>시간대별 — 낮엔 국내, 밤엔 미국이 현금 전부 사용</option>
+      </select>
+      <div class="mute" style="margin-top:4px">시간대별: 다른 시장 몫을 떼어 두지 않아요. 계좌 전체를 쓰려면 국내·미국 원금을 각각 계좌 금액만큼 잡으세요. 이미 산 종목이 쥔 현금은 팔 때까지 그 시장 몫이에요.</div></div>
   </div>
   <label for="us_symbols">미국 종목 — 티커, 쉼표나 줄바꿈으로 구분 (최대 40개)</label>
   <textarea id="us_symbols" name="us_symbols" rows="4">{{ us.symbols|join(', ') }}</textarea>

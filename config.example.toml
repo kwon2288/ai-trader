@@ -88,6 +88,7 @@ margin_currency = "krw"       # NH: krw = 원화로 바로 주문(환전 불필�
 shared_cash = "auto"          # 국내·미국이 같은 계좌 현금(증거금)을 같이 쓰면, 모자랄 때 두 시장 남은 예산 비율로 나눔
                               # auto = NH 같은 계좌 + 원화 증거금이면 켬 · true · false
 shared_priority = "split"     # 현금이 모자랄 때: split(남은 예산 비율대로) · kr(국내 우선) · us(미국 우선)
+                              # · session(시간대별: 낮엔 국내, 밤엔 미국이 현금 전부 — 원금도 계좌만큼 잡으면 계좌 전체 사용)
 symbols = [
   "SPLG",   # SPDR S&P500 (저가형)
   "SCHD",   # 미국 배당

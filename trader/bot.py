@@ -424,9 +424,13 @@ class Bot:
         if sh and sh.get("short"):
             other = "미국" if cfg.market == "kr" else "국내"
             how = ledger.PRIORITIES[sh.get("priority", "split")]
-            self.say(f"🔗 국내·미국 같은 계좌: 주문가능 현금 {cfg.money(st['account_cash'])}이 두 시장 남은 예산 합계보다 적어"
-                     f" {how}로 나눠요 → 이 시장 {sh['pct']}% ({cfg.money(sh['cap'])}),"
-                     f" {other} 몫 {100 - sh['pct']}% 남겨 둠")
+            if sh.get("priority") == "session":
+                self.say(f"🔗 국내·미국 같은 계좌 · 시간대별: 지금은 {'국내' if cfg.market == 'kr' else '미국'} 시간이라"
+                         f" 주문가능 현금 {cfg.money(st['account_cash'])}을 전부 이 시장이 써요 ({other} 몫은 떼어 두지 않음)")
+            else:
+                self.say(f"🔗 국내·미국 같은 계좌: 주문가능 현금 {cfg.money(st['account_cash'])}이 두 시장 남은 예산 합계보다 적어"
+                         f" {how}로 나눠요 → 이 시장 {sh['pct']}% ({cfg.money(sh['cap'])}),"
+                         f" {other} 몫 {100 - sh['pct']}% 남겨 둠")
         elif sh and sh.get("fx") is None:
             self.say("🔗 국내·미국 같은 계좌지만 아직 환율을 몰라 현금을 나누지 않았어요 (미국 실행 한 번 뒤부터 적용)")
         if cfg.mode != "dry" and st["account_cash"] is not None and st["account_cash"] < st["room"] \

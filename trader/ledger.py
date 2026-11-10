@@ -182,7 +182,9 @@ def shared_split(j, cfg, room: float, acash: float) -> dict | None:
     base = {"other_room": round(o_conv, 2), "fx": fx, "priority": prio}
     if total <= 0 or acash >= total:
         return {"cap": acash, "pct": None, "short": False, **base}
-    if prio == cfg.market:                       # 이 시장 우선: 남은 예산만큼 먼저 씀
+    if prio == "session":                        # 시간대별: 지금 실행 중인(장이 열린) 시장이 현금을 전부 씀
+        cap = acash
+    elif prio == cfg.market:                     # 이 시장 우선: 남은 예산만큼 먼저 씀
         cap = min(room, acash)
     elif prio in ("kr", "us"):                   # 다른 시장 우선: 그 시장 남은 예산을 먼저 떼어 둠
         cap = max(0.0, acash - o_conv)
@@ -192,11 +194,14 @@ def shared_split(j, cfg, room: float, acash: float) -> dict | None:
     return {"cap": round(cap, 2), "pct": pct, "short": True, **base}
 
 
-PRIORITIES = {"split": "남은 예산 비율대로", "kr": "국내 우선", "us": "미국 우선"}
+PRIORITIES = {"split": "남은 예산 비율대로", "kr": "국내 우선", "us": "미국 우선",
+              "session": "시간대별(낮 국내·밤 미국이 전부)"}
 
 
 def priority(cfg) -> str:
-    """config [us] shared_priority = "split"(기본) | "kr" | "us"."""
+    """config [us] shared_priority = "split"(기본) | "kr" | "us" | "session".
+    session: 다른 시장 몫을 떼어 두지 않는다 — 낮(국내 장)엔 국내가, 밤(미국 장)엔 미국이 주문가능 현금을 전부 쓴다.
+    두 시장 장 시간이 겹치지 않으니 실행 시점에 열린 시장이 곧 주인. 이미 산 종목이 쥔 현금은 팔 때까지 그 시장 것."""
     v = str((getattr(cfg, "us", None) or {}).get("shared_priority", "split")).strip().lower()
     return v if v in PRIORITIES else "split"
 

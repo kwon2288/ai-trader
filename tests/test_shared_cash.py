@@ -67,6 +67,10 @@ def test_priority_options():
     kr.us["shared_priority"] = "us"
     assert ledger.status(j, kr, {}, 240_000)["avail"] == 0                      # 미국 우선: 미국 28만원 > 현금 → 국내 0
     assert abs(ledger.status(j, kr.for_market("us"), {}, 240_000 / 1400)["avail"] - 240_000 / 1400) < 0.05
+    kr.us["shared_priority"] = "session"                                       # 시간대별: 실행 중인 시장이 현금 전부
+    assert ledger.status(j, kr, {}, 240_000)["avail"] == 200_000               # 국내는 남은 예산(20만)까지
+    assert abs(ledger.status(j, kr.for_market("us"), {}, 240_000 / 1400)["avail"] - 240_000 / 1400) < 0.05   # 미국도 24만원 전부
+    assert ledger.status(j, kr, {}, 240_000)["shared"]["cap"] == 240_000
     kr.us["shared_priority"] = "weird"
     assert ledger.priority(kr) == "split"
 
