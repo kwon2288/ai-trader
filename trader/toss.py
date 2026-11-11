@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 BASE = "https://openapi.tossinvest.com"
 
 # 호출 그룹별 최소 간격(초) — 공개된 한도(ACCOUNT·STOCK_ALL 초당 1회, ORDER 10, MARKET_DATA 15, CHART 20)보다 보수적으로
-INTERVAL = {"ACCOUNT": 1.1, "ASSET": 1.1, "ORDER_INFO": 1.1, "ORDER": 0.15, "STOCK": 0.2,
+INTERVAL = {"ACCOUNT": 1.1, "ASSET": 1.1, "TRANSACTION": 1.1, "ORDER_INFO": 1.1, "ORDER": 0.15, "STOCK": 0.2,
             "MARKET_DATA": 0.1, "MARKET_DATA_CHART": 0.08, "MARKET_INFO": 0.2}
 
 
@@ -35,6 +35,8 @@ def _group(method: str, path: str) -> str:
         return "ACCOUNT"
     if path.startswith("/api/v1/holdings"):
         return "ASSET"
+    if path.startswith("/api/v1/transactions"):
+        return "TRANSACTION"
     if path.startswith(("/api/v1/buying-power", "/api/v1/sellable-quantity", "/api/v1/commissions")):
         return "ORDER_INFO"
     if path.startswith("/api/v1/orders"):
@@ -74,6 +76,7 @@ class TossBroker:
         self._last: dict[str, float] = {}
         self._names: dict[str, str] = {}
         self._calendar: dict | None = None
+        self.fx = 0.0                      # 최근 조회 환율 (원/달러, 매매기준율) — 미국 주문에 당시 환율을 남기는 데 쓴다
         self.account_seq = account_seq or os.environ.get("TOSS_ACCOUNT_SEQ", "").strip() or self._pick_account()
         self.account = f"seq {self.account_seq}"
 
@@ -250,7 +253,41 @@ class TossBroker:
                                      conv(_num(it.get("averagePurchasePrice"))), conv(_num(it.get("lastPrice"))))
         bp = self._req("GET", "/api/v1/buying-power", {"currency": self.currency}, account=True) or {}
         cash = _num(bp.get("cashBuyingPower"))
+        if self.market == "us":
+            self._ensure_fx()
         return Balance(orderable_cash=int(cash) if self.market == "kr" else round(cash, 2), holdings=holdings)
+
+    def _ensure_fx(self) -> float:
+        """원/달러 환율 (참고용 매매기준율, 1분마다 갱신). 실패해도 매매에는 영향 없음."""
+        if not self.fx:
+            try:
+                r = self._req("GET", "/api/v1/exchange-rate", {"baseCurrency": "USD", "quoteCurrency": "KRW"}) or {}
+                self.fx = _num(r.get("midRate")) or _num(r.get("rate"))
+            except Exception as e:  # noqa: BLE001
+                log.info("토스 환율 조회 실패: %s", e)
+        return self.fx
+
+    def settled_fx(self, days: int = 21) -> list[dict]:
+        """결제가 끝난 미국 주식 매매의 실제 환율. 거래내역은 주문 식별자를 주지 않으므로
+        (종목·방향·수량·결제일)로 주문과 맞춘다. 반환: [{code, side, qty, date(결제일), fx}] 최신순"""
+        from datetime import timedelta
+        since = (datetime.now(KST).date() - timedelta(days=days)).isoformat()
+        out, cursor = [], None
+        for _ in range(5):                               # 최대 500건
+            params = {"transactionTypes": "BUY,SELL", "from": since, "limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+            res = self._req("GET", "/api/v1/transactions", params, account=True) or {}
+            for t in res.get("transactions") or []:
+                fx = _num(t.get("exchangeRate"))
+                if (t.get("marketCountry") == "US" and t.get("settled") and fx > 0 and t.get("symbol")
+                        and (t.get("assetClass") or "STOCK") == "STOCK" and not t.get("isCancellation")):
+                    out.append({"code": t["symbol"], "side": t.get("transactionType"), "qty": _num(t.get("quantity")),
+                                "date": t.get("settlementDate") or "", "fx": fx})
+            cursor = res.get("nextCursor")
+            if not (res.get("hasNext") and cursor):
+                break
+        return out
 
     def krw_cash(self) -> float:
         """원화 주문가능 금액 — 미국 시장에서 달러가 모자랄 때 '원화는 있다'고 알려 주기 위한 조회."""

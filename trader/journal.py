@@ -51,7 +51,8 @@ class Journal:
                     # 증권사별 봇 장부 (v0.22): 증권사를 바꿔도 이전 증권사에서 봇이 산 종목을 잊지 않게
                     "ALTER TABLE bot_positions ADD COLUMN broker TEXT",
                     # 주문 당시 환율 (v0.25): 미국 손익을 원화로 볼 때 그때 환율로
-                    "ALTER TABLE orders ADD COLUMN fx REAL"):                   # 봇 평단                    # 종목명  # 국내/미국
+                    "ALTER TABLE orders ADD COLUMN fx REAL",
+                    "ALTER TABLE orders ADD COLUMN fx_settled INTEGER"):       # 1 = 증권사 결제 환율로 확정 (토스)                   # 봇 평단                    # 종목명  # 국내/미국
             try:
                 self.db.execute(sql)
                 self.db.commit()

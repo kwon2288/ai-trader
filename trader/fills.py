@@ -105,3 +105,41 @@ def reconcile(j, cfg, broker, say=print, cancel_before: str | None = None, notif
             say(f"✔ 체결 확인: {o['name']} {side} {int(f.filled)}/{o['qty']}주 @ {cfg.money(f.avg_price or o['est_price'])}")
         n += 1
     return n
+
+
+def sync_settled_fx(j, cfg, broker, say=print) -> int:
+    """미국 주문의 환율을 증권사 결제 환율로 확정 (토스). 주문 때는 참고 환율을 남기고, 결제(보통 1영업일 뒤)가 끝나면
+    거래내역의 실제 환율로 바꾼다. 확정할 주문이 없으면 조회하지 않는다. 반환: 확정한 주문 수"""
+    if cfg.market != "us" or cfg.mode == "dry" or not hasattr(broker, "settled_fx"):
+        return 0
+    from datetime import date, timedelta
+    since = (datetime.now(KST) - timedelta(days=21)).isoformat(timespec="seconds")
+    rows = [dict(r) for r in j.db.execute(
+        "SELECT rowid, ts, side, code, filled_qty FROM orders WHERE mode=? AND ok=1 AND COALESCE(fx_settled,0)=0 "
+        "AND COALESCE(filled_qty,0) > 0 AND COALESCE(order_no,'') != 'DRY' AND ts >= ? ORDER BY ts DESC",
+        (cfg.ledger, since))]
+    if not rows:
+        return 0
+    try:
+        txs = broker.settled_fx()
+    except Exception as e:  # noqa: BLE001
+        say(f"ℹ 결제 환율 조회 실패 (다음 실행 때 다시 확인): {e}")
+        return 0
+    n = 0
+    for o in rows:                                      # 최신 주문부터, 거래내역도 최신순 → 같은 조건이면 가까운 것끼리
+        day = date.fromisoformat(session_day(o["ts"], "us"))
+        for t in txs:
+            try:
+                sd = date.fromisoformat(t["date"])
+            except ValueError:
+                continue
+            if (t["code"] == o["code"] and t["side"] == o["side"] and abs(t["qty"] - float(o["filled_qty"])) < 1e-6
+                    and day <= sd <= day + timedelta(days=6)):
+                j.db.execute("UPDATE orders SET fx=?, fx_settled=1 WHERE rowid=?", (t["fx"], o["rowid"]))
+                txs.remove(t)
+                n += 1
+                break
+    if n:
+        j.db.commit()
+        say(f"💱 미국 주문 {n}건의 환율을 결제 환율로 확정했어요")
+    return n

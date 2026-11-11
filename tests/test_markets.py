@@ -136,6 +136,7 @@ class TossSession:
     def __init__(self, open_now=True):
         self.calls, self.tokens, self.fail401 = [], 0, False
         now = datetime.now(KST)
+        self.settle = now.date().isoformat()
         a, b = (now - timedelta(hours=1), now + timedelta(hours=1)) if open_now else \
                (now + timedelta(hours=5), now + timedelta(hours=6))
         self.session = {"startTime": a.isoformat(), "endTime": b.isoformat()}
@@ -166,6 +167,16 @@ class TossSession:
                 {"symbol": "005930", "name": "삼성전자", "marketCountry": "KR", "quantity": "1",
                  "averagePurchasePrice": "70000", "lastPrice": "71000"}]},
             "/api/v1/buying-power": {"currency": "USD", "cashBuyingPower": "512.34"},
+            "/api/v1/exchange-rate": {"baseCurrency": "USD", "quoteCurrency": "KRW", "rate": "1380.5", "midRate": "1375"},
+            "/api/v1/transactions": {"transactions": [
+                {"transactionType": "BUY", "marketCountry": "US", "currency": "USD", "symbol": "KO", "assetClass": "STOCK",
+                 "quantity": "2", "exchangeRate": "1386.00", "settlementDate": self.settle, "settled": True,
+                 "isCancellation": False},
+                {"transactionType": "BUY", "marketCountry": "US", "currency": "USD", "symbol": "KO", "assetClass": "STOCK",
+                 "quantity": "2", "exchangeRate": None, "settlementDate": self.settle, "settled": False},
+                {"transactionType": "SELL", "marketCountry": "KR", "currency": "KRW", "symbol": "005930",
+                 "assetClass": "STOCK", "quantity": "2", "exchangeRate": None, "settlementDate": self.settle,
+                 "settled": True}], "nextCursor": None, "hasNext": False},
             "/api/v1/sellable-quantity": {"sellableQuantity": "9"},
             "/api/v1/orders": {"orderId": "abcdef1234567890xyz", "clientOrderId": "x"},
         }.get(path)
@@ -226,6 +237,38 @@ def test_toss_reissues_token_on_401():
     s.fail401 = True
     assert b.quote("AAPL").price == 231.4
     assert s.tokens == 2
+
+
+
+
+def test_toss_fx_and_settled_fx():
+    """토스 미국: 잔고 조회 때 환율을 받아 두고(주문에 기록), 결제가 끝나면 거래내역의 실제 환율로 확정."""
+    from types import SimpleNamespace
+    from trader import fills
+    b, sess, tmp = make_toss()
+    b.balance()
+    assert b.fx == 1375.0
+    assert any(c[1] == "/api/v1/exchange-rate" and c[2] == {"baseCurrency": "USD", "quoteCurrency": "KRW"}
+               for c in sess.calls)
+    cfg = us_cfg(tmp).for_market("us")
+    cfg.mode = "live"
+    j = Journal(cfg.db_path)
+    j.set("fx_usdkrw", str(b.fx))
+    ok = SimpleNamespace(ok=True, order_no="N1", message="")
+    rid = j.add_order(cfg.ledger, "BUY", "KO", "코카콜라", 2, 90.0, ok, "t", "filled")
+    rid2 = j.add_order(cfg.ledger, "BUY", "AAPL", "애플", 1, 230.0, ok, "t", "filled")     # 거래내역에 아직 없음
+    q = lambda r: tuple(j.db.execute("SELECT fx, fx_settled FROM orders WHERE rowid=?", (r,)).fetchone())  # noqa: E731
+    assert q(rid) == (1375.0, None)
+    said = []
+    assert fills.sync_settled_fx(j, cfg, b, said.append) == 1
+    assert q(rid) == (1386.0, 1) and q(rid2) == (1375.0, None) and "결제 환율" in said[0]
+    n = len(sess.calls)
+    j.db.execute("DELETE FROM orders WHERE rowid=?", (rid2,))
+    j.db.commit()
+    assert fills.sync_settled_fx(j, cfg, b, said.append) == 0 and len(sess.calls) == n      # 확정할 게 없으면 조회 안 함
+    kr, _, _ = make_toss()
+    kr.market = "kr"
+    assert fills.sync_settled_fx(j, us_cfg(tmp), kr, said.append) == 0                      # 국내는 해당 없음
 
 
 if __name__ == "__main__":

@@ -360,6 +360,7 @@ class Bot:
         try:
             fills.reconcile(self.j, cfg, self.broker, self.say, notify=self.notify,
                             cancel_before=None if analyze_only else now().isoformat(timespec="seconds"))
+            fills.sync_settled_fx(self.j, cfg, self.broker, self.say)      # 토스: 결제 환율로 확정
         except Exception as e:  # noqa: BLE001
             self.say(f"⚠ 체결 확인 중 오류: {e}")
 
