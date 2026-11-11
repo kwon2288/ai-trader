@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 from contextlib import contextmanager
 
 from .broker import BrokerError
 from .config import Config
 from .journal import KST, Journal
+
+log = logging.getLogger(__name__)
 
 
 class Busy(RuntimeError):
@@ -219,7 +222,43 @@ def close_summary(base: Config, market: str, at=None, force: bool = False) -> bo
     if ai["calls"]:
         lines.append(f"AI: {ai['calls']}회 · ${ai['usd']:.3f}")
     notify.send(cfg, "daily", "\n".join(lines))
+    if market == "us" and base.us_enabled:            # 미국 마감이 그 거래일의 마지막 → 국내+미국 통합 요약도 한 번
+        try:
+            notify.send(cfg, "daily", combined_summary(base, now.date()))
+        except Exception as e:  # noqa: BLE001
+            log.warning("통합 마감 요약 실패: %s", e)
     return True
+
+
+def combined_summary(base: Config, day) -> str:
+    """국내 + 미국 하루 통합 요약 (원화). day = 거래일 (국내 날짜 = 뉴욕 날짜).
+    미국 실현 손익은 거래 당시 환율(환차손익 포함), 보유 평가·예산은 최근 환율."""
+    from datetime import datetime
+    from . import ledger, pricing
+    from .journal import KST
+    kr, us = market_cfg(base, "kr"), market_cfg(base, "us")
+    j, ju = Journal(kr.db_path), Journal(us.db_path)
+    try:
+        fx = float(j.get("fx_usdkrw") or 0) or 1400.0
+    except ValueError:
+        fx = 1400.0
+    rk = ledger.period(j, kr.ledger, day, day, ledger.costs_of(kr))
+    ru = ledger.period(ju, us.ledger, day, day, ledger.costs_of(us))
+    won = lambda v: f"{v:+,.0f}원"                                     # noqa: E731
+    lines = [f"📊 🌐 통합 마감 요약 ({day:%m/%d})",
+             f"오늘 주문: 매수 {rk['buys'] + ru['buys']}건 · 매도 {rk['n'] + ru['n']}건",
+             f"오늘 실현 손익: {won(rk['pnl_krw'] + ru['pnl_krw'])}"
+             f" (국내 {won(rk['pnl_krw'])} · 미국 {us.money(ru['pnl'])} ≈ {won(ru['pnl_krw'])})"]
+    sk, su = j.snapshot(kr.ledger) or {}, ju.snapshot(us.ledger) or {}
+    if sk.get("budget") is not None or su.get("budget") is not None:
+        tot = {k: float(sk.get(k) or 0) + float(su.get(k) or 0) * fx for k in ("budget", "pnl", "invested")}
+        pct = tot["pnl"] / tot["budget"] * 100 if tot["budget"] else 0.0
+        lines.append(f"봇 손익(누적): {won(tot['pnl'])} ({pct:+.2f}%)")
+        lines.append(f"투자 중: {tot['invested']:,.0f}원 / 예산 {tot['budget']:,.0f}원 (환율 {fx:,.0f}원)")
+    ai = pricing.ai_cost(j, kr.data_dir, None, datetime(day.year, day.month, day.day, tzinfo=KST))
+    if ai["calls"]:
+        lines.append(f"AI: {ai['calls']}회 · ${ai['usd']:.3f} (≈ {ai['usd'] * fx:,.0f}원)")
+    return "\n".join(lines)
 
 
 def refresh_balance(cfg: Config, market: str = "kr") -> dict:

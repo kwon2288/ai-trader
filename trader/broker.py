@@ -17,6 +17,11 @@ from zoneinfo import ZoneInfo
 log = logging.getLogger(__name__)
 
 
+def clean_name(v, fallback: str = "") -> str:
+    """증권사가 준 종목명 정리 — NH 는 일부 종목명 앞에 '*' 를 붙여 준다 ('*HMM' → 'HMM')."""
+    return (str(v or "").strip().lstrip("*").strip()) or fallback
+
+
 def _num(v, default=0.0) -> float:
     try:
         return float(str(v).replace(",", "").strip())
@@ -247,7 +252,7 @@ class NHBroker:
             warns.append("단기과열")
         return Quote(
             code=code,
-            name=(o.get("iem_nm") or code).strip(),
+            name=clean_name(o.get("iem_nm"), code),
             price=_int(o.get("stck_prpr")),
             change_pct=_num(o.get("prdy_ctrt")),
             ask=_int(o.get("askp1") or o.get("askp")),
@@ -342,7 +347,7 @@ class NHBroker:
             if qty <= 0:
                 continue
             code = str(r.get("iem_cd", "")).strip().lstrip("A")[-6:]
-            holdings[code] = Holding(code, (r.get("iem_nm") or "").strip(), qty,
+            holdings[code] = Holding(code, clean_name(r.get("iem_nm")), qty,
                                      _int(r.get("phs_pr")), _int(r.get("now_pr")))
         cash = _int(o0.get("orr_pbl_amt4")) or _int(o0.get("nxt2_dd_dca")) or _int(o0.get("dca"))
         return Balance(orderable_cash=cash, holdings=holdings)

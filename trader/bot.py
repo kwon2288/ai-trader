@@ -111,6 +111,34 @@ class Bot:
         return {"kr": "🇰🇷", "us": "🇺🇸"}.get(self.cfg.market, "") + ("" if self.cfg.mode == "live" else
                                                                        f"[{ {'mock': '모의', 'dry': '드라이런'}[self.cfg.mode] }]")
 
+    def _usd_short_hint(self, st: dict, quotes: dict) -> None:
+        """토스 미국: Open API 주문은 자동환전이 안 된다 → 달러가 모자라면 원화 잔액과 함께 환전하라고 알려 준다.
+        로그에는 매번, 알림은 한 주도 살 수 없을 때 하루 한 번."""
+        cfg = self.cfg
+        if cfg.market != "us" or cfg.mode == "dry" or not hasattr(self.broker, "krw_cash"):
+            return
+        cash, room = st.get("account_cash"), st.get("room") or 0
+        if cash is None or room <= 0 or cash >= room:
+            return
+        try:
+            krw = float(self.broker.krw_cash())
+        except Exception:  # noqa: BLE001
+            krw = 0.0
+        has = f"원화 {krw:,.0f}원은 있지만 " if krw > 0 else ""
+        self.say(f"💱 토스 달러 주문가능 {cfg.money(cash)} < 남은 예산 {cfg.money(room)} — {has}"
+                 f"토스 Open API 주문은 자동환전이 안 돼요 → 토스 앱에서 달러로 환전해 두세요")
+        prices = [q.price for q in quotes.values() if getattr(q, "price", 0)]
+        if not prices or cash >= min(prices):
+            return                                     # 한 주라도 살 수 있으면 로그만
+        from .fills import market_today
+        key = f"usd_short_{market_today('us')}"
+        if self.j.get(key):
+            return
+        self.j.set(key, "1")
+        self.notify("errors", f"💱 {self._mk()} 달러가 모자라 매수할 수 없어요 — 주문가능 {cfg.money(cash)}"
+                              f" (가장 싼 후보 {cfg.money(min(prices))})\n{has}"
+                              f"토스 Open API 는 자동환전을 지원하지 않아요. 토스 앱에서 달러로 환전해 주세요.")
+
     def notify(self, kind: str, text: str) -> None:
         from . import notify
         notify.send(self.cfg, kind, text)
@@ -437,6 +465,7 @@ class Bot:
                 and not (sh and sh.get("short")):
             self.say(f"⚠ 계좌 주문가능 현금 {cfg.money(st['account_cash'])} < 남은 예산 {cfg.money(st['room'])}"
                      f" → {cfg.money(st['avail'])}까지만 매수합니다")
+        self._usd_short_hint(st, quotes)
         run_id = self.j.start_run(cfg.ledger, equity)
         self.j.save_snapshot(cfg.ledger, {
             **st, "equity": equity, "pnl_pct": dd,

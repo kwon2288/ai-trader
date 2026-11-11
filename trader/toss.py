@@ -252,6 +252,11 @@ class TossBroker:
         cash = _num(bp.get("cashBuyingPower"))
         return Balance(orderable_cash=int(cash) if self.market == "kr" else round(cash, 2), holdings=holdings)
 
+    def krw_cash(self) -> float:
+        """원화 주문가능 금액 — 미국 시장에서 달러가 모자랄 때 '원화는 있다'고 알려 주기 위한 조회."""
+        bp = self._req("GET", "/api/v1/buying-power", {"currency": "KRW"}, account=True) or {}
+        return _num(bp.get("cashBuyingPower"))
+
     def buyable_qty(self, code: str, price: float) -> int:
         bp = self._req("GET", "/api/v1/buying-power", {"currency": self.currency}, account=True) or {}
         cash = _num(bp.get("cashBuyingPower"))

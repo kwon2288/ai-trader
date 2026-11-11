@@ -172,6 +172,7 @@ def _monitor_loop():
             raw = settings_io.read(CONFIG_PATH)
             j = Journal(c.db_path)
             monitor.check(j, c, raw, notify.send)
+            monitor.disk_check(j, c, notify.send)          # 디스크 85% 이상이면 하루 한 번 알림
             from trader.runner import close_summary
             for mk in ["kr"] + (["us"] if c.us_enabled else []):
                 try:

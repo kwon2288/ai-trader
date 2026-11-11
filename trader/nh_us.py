@@ -11,7 +11,7 @@ import os
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
-from .broker import Balance, BrokerError, Holding, NHBroker, OrderFill, OrderResult, Quote, _num
+from .broker import Balance, BrokerError, Holding, NHBroker, OrderFill, OrderResult, Quote, _num, clean_name
 
 ET = ZoneInfo("America/New_York")
 NATION_US = "200"
@@ -48,7 +48,7 @@ class NHUSBroker(NHBroker):
         else:
             status = "1" if us_regular_hours() else ""
         return Quote(
-            code=code, name=(o.get("iem_nm") or code).strip(), price=price,
+            code=code, name=clean_name(o.get("iem_nm"), code), price=price,
             change_pct=_num(o.get("pctchng")),
             ask=_f(o.get("best_ask1")) or price, bid=_f(o.get("best_bid1")) or price,
             market_status=status, market=(o.get("exch_name") or "").strip(),
@@ -129,7 +129,7 @@ class NHUSBroker(NHBroker):
             if qty <= 0:
                 continue
             code = (r.get("iem_cd") or "").strip().upper()
-            holdings[code] = Holding(code, (r.get("iem_nm") or code).strip(), qty,
+            holdings[code] = Holding(code, clean_name(r.get("iem_nm"), code), qty,
                                      _f(r.get("fc_avg_phs_pr") or r.get("fc_phs_uit_pr")),
                                      _f(r.get("fc_sec_end_pr")))
         # 주문 가능 금액(달러 환산). 원화 증거금이면 원화 금액을 환율로 나눈다.

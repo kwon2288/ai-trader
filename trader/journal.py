@@ -57,6 +57,14 @@ class Journal:
                 self.db.commit()
             except sqlite3.OperationalError:
                 pass
+        # 예전 기록의 종목명 앞 '*' 정리 (NH 가 붙여 주던 것 — v0.26 부터는 받을 때 뗀다). 한 번만.
+        try:
+            if not self.get("names_cleaned"):
+                for tbl in ("orders", "decisions", "bot_positions"):
+                    self.db.execute(f"UPDATE {tbl} SET name = ltrim(name, '* ') WHERE name LIKE '*%'")
+                self.set("names_cleaned", "1")
+        except sqlite3.Error:
+            pass
 
     # Python 3.13+ 의 sqlite3 연결은 참조가 사라져도 GC 가 돌 때까지 닫히지 않는다 →
     # 웹처럼 요청마다 Journal 을 만들면 파일 핸들이 쌓여 'Too many open files' 가 난다. 바로 닫는다.

@@ -9,6 +9,9 @@ ExecStart=/opt/ai-trader/.venv/bin/python -m web.app
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=8192
+# 같은 오류가 반복돼도 로그가 디스크를 채우지 못하게 (30초에 300줄까지만 기록)
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=300
 
 [Install]
 WantedBy=multi-user.target

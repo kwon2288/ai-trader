@@ -28,6 +28,14 @@ if [ -f /etc/systemd/system/ai-trader-us.timer ] && [ ! -f /etc/systemd/system/a
   cp deploy/ai-trader.service deploy/ai-trader.timer /etc/systemd/system/ && echo "  · 국내 자동 실행 타이머 설치" && reload=1
 fi
 [ "$reload" = 1 ] && systemctl daemon-reload
+# 시스템 로그(journald) 크기 제한 — 없으면 한 번 설치 (로그가 디스크를 채우는 사고 방지)
+jd=/etc/systemd/journald.conf.d/ai-trader.conf
+if [ -d /etc/systemd ] && [ ! -f "$jd" ] && [ "$(id -u)" = 0 ]; then
+  mkdir -p "$(dirname "$jd")"
+  printf '[Journal]\nSystemMaxUse=200M\n' > "$jd"
+  systemctl restart systemd-journald 2>/dev/null || true
+  echo "  · 시스템 로그 크기 제한 설치 (200MB)"
+fi
 # 설치된 자동 실행 타이머가 꺼져 있으면 켬 (재부팅 후 안 켜지는 경우 등)
 for t in ai-trader.timer ai-trader-us.timer; do
   if [ -f "/etc/systemd/system/$t" ] && ! systemctl is-enabled --quiet "$t"; then

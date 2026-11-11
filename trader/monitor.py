@@ -68,6 +68,38 @@ def check(j, cfg, raw: dict, notify_fn=None, now: datetime | None = None) -> lis
     return sent
 
 
+DISK_WARN_PCT = 85
+
+
+def disk_check(j, cfg, notify_fn=None, now: datetime | None = None, usage=None) -> str | None:
+    """디스크가 거의 찼으면(85% 이상) 하루 한 번 알림 — 가득 차면 일지 기록·백업·주문 기록이 모두 실패한다.
+    루트(/)와 data 폴더가 있는 디스크를 본다. 반환: 보낸 메시지 (없으면 None)."""
+    import shutil
+    usage = usage or shutil.disk_usage
+    worst = None
+    for path in dict.fromkeys(["/", str(cfg.data_dir)]):
+        try:
+            u = usage(path)
+        except OSError:
+            continue
+        pct = u.used / u.total * 100 if u.total else 0
+        if pct >= DISK_WARN_PCT and (worst is None or pct > worst[1]):
+            worst = (path, pct, u.free)
+    if worst is None:
+        return None
+    day = (now or datetime.now(KST)).date().isoformat()
+    if j.get("disk_warn") == day:
+        return None
+    j.set("disk_warn", day)
+    path, pct, free = worst
+    msg = (f"💽 서버 디스크가 거의 찼어요 — {path} {pct:.0f}% 사용 (남은 공간 {free / 1e9:.1f}GB)\n"
+           f"가득 차면 매매 기록·백업이 실패해요. 확인: du -xh --max-depth=1 /var | sort -h | tail\n"
+           f"로그 정리: journalctl --vacuum-size=100M · truncate -s 0 /var/log/syslog")
+    if notify_fn:
+        notify_fn(cfg, "errors", msg)
+    return msg
+
+
 def ping(cfg, ok: bool = True) -> None:
     """자동 실행이 끝날 때 외부 헬스체크 주소에 신호 (없으면 아무것도 안 함)."""
     url = os.environ.get("HEALTHCHECK_URL_US" if cfg.market == "us" else "HEALTHCHECK_URL") \
