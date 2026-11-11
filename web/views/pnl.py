@@ -126,8 +126,8 @@ def combine(parts: list[tuple[dict, str]]) -> dict:
     return {"trades": trades, "pnl": round(sum(t["pnl"] for t in trades)), "n": n,
             "costs": round(sum(t["cost"] for t in trades)), "wins": wins,
             "win_rate": round(wins / n * 100, 1) if n else None,
-            "best": max(trades, key=lambda t: t["pnl"]) if trades else None,
-            "worst": min(trades, key=lambda t: t["pnl"]) if trades else None,
+            "best": max(trades, key=lambda t: t["pnl_pct"]) if trades else None,
+            "worst": min(trades, key=lambda t: t["pnl_pct"]) if trades else None,
             "by_code": sorted(by_code.values(), key=lambda b: -b["pnl"]),
             "by_day": sorted(by_day.items()), "buys": buys, "buy_amount": round(buy_amt)}
 

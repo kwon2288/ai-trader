@@ -40,6 +40,18 @@ def test_combine_uses_trade_time_fx():
     assert sum(v for _, v in r["by_day"]) == 40_500 and r["buy_amount"] == 500_000 + 168_000
 
 
+def test_best_worst_by_percent():
+    """최고/최저는 화면에 % 로 보여 주니 % 기준 — 금액이 작아도 낙폭이 큰 거래가 최저."""
+    j = Journal(Path(tempfile.mkdtemp()) / "j.db")
+    _fill(j, "mock", "BUY", "A", "큰금액", 2, 23_250)
+    _fill(j, "mock", "SELL", "A", "큰금액", 2, 21_650)               # -6.9%, -3,200원
+    _fill(j, "mock", "BUY", "B", "큰낙폭", 2, 16_790)
+    _fill(j, "mock", "SELL", "B", "큰낙폭", 2, 15_420)               # -8.2%, -2,740원
+    z = {"kr_fee_pct": 0, "kr_sell_tax_pct": 0, "us_fee_pct": 0}
+    r = ledger.period(j, "mock", None, None, z)
+    assert r["worst"]["name"] == "큰낙폭" and r["best"]["name"] == "큰금액"
+
+
 def test_old_orders_without_fx_use_latest():
     j = Journal(Path(tempfile.mkdtemp()) / "j.db")
     _fill(j, "mock_us", "BUY", "KO", "코카콜라", 1, 100.0)            # 환율 모름 (예전 주문)

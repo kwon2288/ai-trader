@@ -258,8 +258,8 @@ def period(j, ledger: str, start: date | None, end: date | None, costs: dict | N
     return {"trades": list(reversed(ts)), "pnl": round(sum(t["pnl"] for t in ts), 2), "n": len(ts),
             "costs": round(sum(t["cost"] for t in ts), 2),
             "wins": len(wins), "win_rate": round(len(wins) / len(ts) * 100, 1) if ts else None,
-            "best": max(ts, key=lambda t: t["pnl"]) if ts else None,
-            "worst": min(ts, key=lambda t: t["pnl"]) if ts else None,
+            "best": max(ts, key=lambda t: t["pnl_pct"]) if ts else None,       # 화면에 %로 보여 주니 % 기준으로
+            "worst": min(ts, key=lambda t: t["pnl_pct"]) if ts else None,
             "by_code": sorted(by_code.values(), key=lambda b: -b["pnl"]),
             "by_day": sorted(by_day.items()), "buys": buys["n"], "buy_amount": buys["amt"],
             "buy_amount_krw": round(buys["amt_krw"]), "pnl_krw": sum(t["pnl_krw"] for t in ts),
