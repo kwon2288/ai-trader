@@ -92,4 +92,31 @@
   <div class="mute" style="margin-top:6px">실제 체결가 기준이에요 (v0.14 이전 주문은 예상가). 수수료·세금은 증권사가 알려 주면 실제 값,
     아니면 설정 → 예산·위험관리의 비율로 계산한 추정치예요.</div>
 </div>
+
+{% if card is defined and card and market != 'all' %}
+<div class="card" id="scorecard">
+  <h2>AI 성적표 <span class="mute" style="font-weight:normal;font-size:13px">규칙 매수 신호를 AI 가 걸렀을 때의 결과 (기간과 무관, 전체)</span></h2>
+  <div class="stats">
+    <div class="stat"><div class="k">AI 가 사자고 한 신호</div>
+      <div class="v">{% if card.taken.avg is not none %}{{ pct(card.taken.avg) }}{% else %}-{% endif %}</div>
+      <div class="mute">{{ card.taken.n }}건 평균{% if card.taken.n %} · 오른 것 {{ card.taken.wins }}건{% endif %}</div></div>
+    <div class="stat"><div class="k">AI 가 막은 신호</div>
+      <div class="v">{% if card.blocked.avg is not none %}{{ pct(card.blocked.avg) }}{% else %}-{% endif %}</div>
+      <div class="mute">{{ card.blocked.n }}건 평균{% if card.blocked.n %} · 오른 것 {{ card.blocked.wins }}건{% endif %}</div></div>
+  </div>
+  <div style="margin-top:8px">{{ card.verdict }}</div>
+  {% if card.rows %}
+  <div class="scroll" style="margin-top:8px"><table>
+    <tr><th>날짜</th><th>종목</th><th>AI</th><th class="r">{{ card.after_days }}거래일 뒤</th></tr>
+    {% for x in card.rows %}
+    <tr><td class="nw">{{ x.day[5:] }}</td><td>{{ x.name }}<div class="mute">{{ x.note }}</div></td>
+      <td class="nw">{{ '🟢 사자' if x.ai_buy else '⛔ 막음' }}</td>
+      <td class="r nw">{% if x.ret is not none %}{{ pct(x.ret) }}{% elif x.done %}<span class="mute">확인 못 함</span>{% else %}<span class="mute">대기 중</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+  <div class="mute" style="margin-top:6px">신호가 난 날의 가격에서 {{ card.after_days }}거래일 뒤 종가까지의 변화예요 (수수료 제외, 실제로 샀는지와 무관).
+    ‘막은 신호’가 더 좋았다면 AI 가 좋은 기회를 걸러 내고 있다는 뜻이에요. 평가 대기 {{ card.pending }}건.</div>
+</div>
+{% endif %}
 {% endblock %}

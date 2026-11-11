@@ -153,6 +153,12 @@
         <input id="{{ mk }}_core_pct" name="{{ mk }}_core_pct" value="{{ v.core_pct }}" inputmode="numeric"></div>
       <div><label for="core_{{ mk }}">코어 ETF ({{ '예: 069500 KODEX 200' if mk == 'kr' else '예: SPYM' }})</label>
         <input id="core_{{ mk }}" name="core_{{ mk }}" value="{{ v.core_code }}"></div>
+      <div><label style="display:flex;gap:8px;align-items:center;color:var(--fg)">
+        <input type="checkbox" name="{{ mk }}_guard" style="width:auto" {{ 'checked' if v.guard }}>
+        보호 규칙 (추격 매수 차단 · 돌파 실패 정리 · 이익 보호)</label></div>
+      <div><label style="display:flex;gap:8px;align-items:center;color:var(--fg)">
+        <input type="checkbox" name="{{ mk }}_late_buy" style="width:auto" {{ 'checked' if v.late_buy }}>
+        돌파 매수는 그날 마지막 실행에서만</label></div>
     </div>
     {% endfor %}
     <h3 style="margin:16px 0 6px;font-size:15px">공통</h3>
@@ -161,11 +167,25 @@
       <option value="direct" {{ 'selected' if strat_m.kr.rule_sell == 'direct' }}>바로 매도 — AI 확인 없이 (백테스트와 같게, 권장)</option>
       <option value="ai" {{ 'selected' if strat_m.kr.rule_sell == 'ai' }}>AI 가 확인 — AI 가 ‘유지’면 안 팖</option>
     </select>
+    <h3 style="margin:16px 0 6px;font-size:15px">보호 규칙 값 (켠 시장에 적용)</h3>
+    <div class="grid2">
+      <div><label for="chase_max_ret5">추격 매수 차단 — 최근 5일 상승률이 이 % 를 넘으면 안 삼 (0 = 끔)</label>
+        <input id="chase_max_ret5" name="chase_max_ret5" value="{{ '%g'|format(strat_m.kr.chase_max_ret5) }}" inputmode="decimal"></div>
+      <div><label for="protect_at_pct">이익 보호 — 수익이 이 % 를 넘으면 손절선을 본전으로 (0 = 끔)</label>
+        <input id="protect_at_pct" name="protect_at_pct" value="{{ '%g'|format(strat_m.kr.protect_at_pct) }}" inputmode="decimal"></div>
+      <div><label for="trail_pct">그 뒤 고점 대비 이 % 내려오면 정리 (0 = 본전만 지킴)</label>
+        <input id="trail_pct" name="trail_pct" value="{{ '%g'|format(strat_m.kr.trail_pct) }}" inputmode="decimal"></div>
+    </div>
     <div class="row" style="margin-top:10px"><button class="btn">전략 저장</button>
       <a class="btn" href="{{ url_for('backtest_page') }}">🔍 백테스트로 비교해 보기</a></div>
   </form>
   <div class="mute" style="margin-top:8px">시장별 값은 백테스트 결과의 ‘적용’ 버튼으로도 바뀌어요 (그 시장에만).
     위험 관리의 손절·익절·최소 보유일은 여기 값이 없을 때 쓰는 기본값이에요.<br>
+    <b>보호 규칙</b>: ① 이미 급하게 오른 종목(최근 5일 상승률 초과)은 신호가 나도 사지 않음 ② 신고가 돌파로 산 종목이
+    돌파선 아래로 1% 넘게 되돌아오면 최소 보유일과 상관없이 바로 정리 ③ 수익이 기준을 넘은 뒤에는 본전(또는 고점 대비 N%) 아래로
+    내려오면 정리. 효과는 백테스트 ‘자동 비교’에서 켠 것/끈 것을 나란히 볼 수 있어요.
+    <b>돌파 매수는 마지막 실행에서만</b>: 장중 가격으로 본 돌파는 마감 때 되밀리는 일이 많아, 그날 마지막 정기 실행
+    (예: 14:30)에서만 사요 — 실행 시각을 15:10 처럼 마감에 가깝게 잡을수록 정확해요.<br>
     <b>코어-위성</b>: 예산 중 코어 비중만큼은 지수 ETF 를 사서 계속 들고 있고(매매·손절 안 함),
     나머지만 봇이 사고팔아요. 예) 예산 20만원 · 코어 70% → 14만원은 KODEX 200 보유, 6만원으로 봇 매매.
     직접 갖고 있는 종목은 코어로 고를 수 없어요(섞이지 않게).</div>

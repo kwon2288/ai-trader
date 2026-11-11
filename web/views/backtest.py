@@ -37,7 +37,8 @@ def _run_backtest(market: str, p: dict) -> None:
             return
         res = backtest.run_job(c, make_broker(c), p["days"], p["stop"], p["take"], p["symbols"], BENCH[market][0],
                                progress=prog, min_hold=p.get("min_hold"), market_filter=p.get("market_filter"),
-                               core_pct=p.get("core_pct"), signal_mode=p.get("signal"), max_hold=p.get("max_hold"))
+                               core_pct=p.get("core_pct"), signal_mode=p.get("signal"), max_hold=p.get("max_hold"),
+                               guard=p.get("guard"))
         j.add_log(c.ledger, "backtest", "web",
                   f"백테스트 {res.get('start')}~{res.get('end')}: 수익률 {res['return_pct']:+.2f}% "
                   f"(기준 {res.get('bench_pct')}%), 최대 낙폭 {res['mdd_pct']}%, 거래 {res['n']}회 ({res['seconds']}초)")
@@ -94,7 +95,7 @@ def backtest_page():
         err = webapp._start_job("backtest", m, {"days": days, "stop": stop, "take": take, "symbols": syms, "sweep": sweep,
                                          "kind": kind or "full", "min_hold": min_hold, "signal": signal,
                                          "max_hold": max_hold, "market_filter": bool(f.get("market_filter")),
-                                         "core_pct": core_pct})
+                                         "core_pct": core_pct, "guard": bool(f.get("guard"))})
         n = backtest.grid_size(backtest.GRIDS[kind]) if kind else 0
         flash(err or (f"🔍 {'단기 매매' if kind == 'short' else '자동'} 비교를 시작했어요 — {len(syms)}종목 × 조합 {n}개, "
                       f"보통 1~3분 (데이터를 처음 받으면 더)." if sweep else
@@ -124,6 +125,8 @@ def _market_values(f, p: str) -> tuple[dict | None, str | None]:
              "stop_loss_pct": float(f.get(p + "stop")), "take_profit_pct": float(f.get(p + "take")),
              "min_hold_days": int(float(f.get(p + "min_hold", 0) or 0)),
              "market_filter": f.get(p + "market_filter") in ("1", "on", "true", "True"),
+             "guard": f.get(p + "guard") in ("1", "on", "true", "True"),
+             "late_buy": f.get(p + "late_buy") in ("1", "on", "true", "True"),
              "core_pct": int(float(f.get(p + "core_pct", 0) or 0))}
     except (TypeError, ValueError):
         return None, "숫자를 확인하세요."
@@ -158,6 +161,17 @@ def strategy_save():
     for mk, v in vals.items():
         text = _write_market(text, mk, v)
     text = settings_io._set(text, "strategy", "rule_sell", "ai" if f.get("rule_sell") == "ai" else "direct")
+    for k, hi in (("chase_max_ret5", 100), ("protect_at_pct", 100), ("trail_pct", 50)):
+        if f.get(k) is None:
+            continue
+        try:
+            num = float(f.get(k) or 0)
+        except ValueError:
+            num = -1
+        if not 0 <= num <= hi:
+            flash(f"보호 규칙 값은 0~{hi} 사이로 넣으세요.", "err")
+            return redirect(url_for("settings") + "#strategy")
+        text = settings_io._set(text, "strategy", k, num)
     for mk in ("kr", "us"):
         v = cfgmod.norm_symbol((f.get(f"core_{mk}") or "").strip(), mk)
         if v:
@@ -187,10 +201,12 @@ def strategy_apply():
         return redirect(request.referrer or url_for("settings"))
     mk = f.get("market") if f.get("market") in ("kr", "us") else webapp.current_market()
     text = webapp.CONFIG_PATH.read_text(encoding="utf-8")
-    text = _write_market(text, mk, {"signal": signal, "max_hold_days": max_hold, "stop_loss_pct": stop,
-                                    "take_profit_pct": take, "min_hold_days": hold,
-                                    "market_filter": f.get("market_filter") in ("1", "on", "true", "True"),
-                                    "core_pct": core})
+    vals = {"signal": signal, "max_hold_days": max_hold, "stop_loss_pct": stop,
+            "take_profit_pct": take, "min_hold_days": hold,
+            "market_filter": f.get("market_filter") in ("1", "on", "true", "True"), "core_pct": core}
+    if f.get("guard") in ("0", "1"):                   # 자동 비교 줄의 보호 규칙 끔/켬도 함께 적용
+        vals["guard"] = f.get("guard") == "1"
+    text = _write_market(text, mk, vals)
     for mk in ("kr", "us"):
         v = (f.get(f"core_{mk}") or "").strip()
         if v:
@@ -201,8 +217,10 @@ def strategy_apply():
     c = webapp.cfg()
     Journal(c.db_path).add_log(c.for_market(mk).ledger, "strategy", "web",
                                f"{'국내' if mk == 'kr' else '미국'} 전략 적용: {label(signal)} · 최대 보유 {max_hold or '제한 없음'}{'일' if max_hold else ''} · 손절 {stop}% · 익절 +{take}% · 최소 보유 {hold}일 · 시장필터 "
-                               f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}%")
+                               f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}%"
+                               + (f" · 보호 규칙 {'켬' if vals['guard'] else '끔'}" if "guard" in vals else ""))
     flash(f"적용했어요: {label(signal)} · 최대 보유 {str(max_hold) + '일' if max_hold else '제한 없음'} · 손절 {stop}% · 익절 +{take}% · 최소 보유 {hold}일 · 시장 필터 "
-          f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}% — "
+          f"{'켬' if f.get('market_filter') in ('1', 'on', 'true', 'True') else '끔'} · 코어 {core}%"
+          f"{(' · 보호 규칙 ' + ('켬' if vals['guard'] else '끔')) if 'guard' in vals else ''} — "
           f"{'국내' if mk == 'kr' else '미국'}에 적용, 다음 실행부터", "ok")
     return redirect(request.referrer or url_for("settings"))

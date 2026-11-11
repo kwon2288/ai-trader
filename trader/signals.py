@@ -159,12 +159,34 @@ def label(mode: str) -> str:
     return MODES.get(mode, MODES["trend"])[0]
 
 
-def evaluate(candidates: list[dict], can_buy: bool = True, mode: str = "trend") -> dict[str, dict]:
-    """종목코드 → 신호. 살 자리가 없으면(can_buy=False) 매수 신호는 세지 않는다."""
+def failed_breakout(c: dict, buffer_pct: float = 1.0) -> dict | None:
+    """돌파 실패: 돌파해서 산 종목이 돌파선(살 때의 20일 최고가) 아래로 되돌아옴 → 작게 지고 나온다.
+    최소 보유일과 상관없이 판다 (urgent)."""
+    close, lvl = _num(c.get("close")), _num(c.get("breakout_level"))
+    if c.get("held") and close and lvl and close < lvl * (1 - buffer_pct / 100):
+        return {"type": "SELL_FAILED_BREAKOUT", "strength": 0.75, "urgent": True,
+                "reason": f"돌파 실패: 돌파선 {lvl:,.2f} 아래로 복귀 ({(close / lvl - 1) * 100:+.1f}%)"}
+    return None
+
+
+def evaluate(candidates: list[dict], can_buy: bool = True, mode: str = "trend", opts: dict | None = None,
+             skipped: list | None = None) -> dict[str, dict]:
+    """종목코드 → 신호. 살 자리가 없으면(can_buy=False) 매수 신호는 세지 않는다.
+    opts(보호 규칙 — strategy.guard_opts): chase_max_ret5 = 최근 5일 상승률 상한(추격 매수 차단),
+    fail_exit = 돌파 실패 조기 정리. skipped 를 주면 과열로 뺀 (후보, 사유)를 담아 준다."""
     _, buy_fn, sell_fn = MODES.get(mode, MODES["trend"])
+    opts = opts or {}
+    cap = float(opts.get("chase_max_ret5") or 0)
     out = {}
     for c in candidates:
-        s = sell_fn(c) or (buy_fn(c) if can_buy else None)
+        s = (failed_breakout(c) if opts.get("fail_exit") and mode == "breakout" else None) or sell_fn(c)
+        if not s and can_buy:
+            s = buy_fn(c)
+            r5 = _num(c.get("ret_5d_pct"))
+            if s and cap and r5 is not None and r5 > cap:
+                if skipped is not None:
+                    skipped.append((c, f"5일 {r5:+.1f}% > {cap:g}%"))
+                s = None
         if s:
             out[c["code"]] = s
     return out
@@ -179,7 +201,8 @@ class RulesAnalyst:
         pf = ctx.get("portfolio", {})
         rules = ctx.get("rules", {})
         slots = rules.get("max_positions", 1) - len(pf.get("positions", []))
-        sig = evaluate(ctx.get("candidates", []), can_buy=slots > 0, mode=rules.get("signal_mode", "trend"))
+        sig = evaluate(ctx.get("candidates", []), can_buy=slots > 0, mode=rules.get("signal_mode", "trend"),
+                       opts=rules.get("signal_opts"))
         decisions = []
         for code, s in sig.items():
             if s["type"].startswith("SELL"):

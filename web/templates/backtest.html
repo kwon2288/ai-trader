@@ -30,13 +30,17 @@
     <label style="display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--fg)">
       <input type="checkbox" name="market_filter" style="width:auto" {{ 'checked' if (r and r.params.market_filter) or (not r and sg.market_filter) }}>
       시장 필터 — 지수가 200일선 아래면 새로 사지 않기</label>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:6px;color:var(--fg)">
+      <input type="checkbox" name="guard" style="width:auto" {{ 'checked' if (r and r.params.guard is defined and r.params.guard) or ((not r or r.params.guard is not defined) and sg.guard) }}>
+      보호 규칙 — 추격 매수 차단(5일 +{{ '%g'|format(sg.chase_max_ret5) }}% 초과) · 돌파 실패 정리 · 이익 보호(+{{ '%g'|format(sg.protect_at_pct) }}% 뒤 본전{{ (' / 고점 −' ~ '%g'|format(sg.trail_pct) ~ '%') if sg.trail_pct }})</label>
     <div class="row" style="margin-top:10px;gap:6px"><button class="btn pri" {{ 'disabled' if busy }}>🧪 백테스트 실행</button>
       <button class="btn" name="mode" value="short" {{ 'disabled' if busy }}>⚡ 단기 매매 비교 ({{ n_short }}개)</button>
       <button class="btn" name="mode" value="sweep" {{ 'disabled' if busy }}>🔍 코어 포함 비교 ({{ n_full }}개)</button>
       {% if busy and job.kind == 'backtest' %}<span class="badge b-warn" id="busy">⏳ 실행 중 {{ job.get('progress', '') }}</span>{% endif %}</div>
   </form>
   <div class="mute" style="margin-top:8px"><b>⚡ 단기 매매 비교</b>는 코어 없이(0%) 매매 신호 4가지(추세 추종 · 눌림목 반등 ·
-    신고가 돌파 · 거래량 급증) × 손절(-3/-5/-8%) × 익절(+5/7/10/15%) × 최대 보유(제한 없음/5/10일) × 시장 필터(끔/켬)를 돌려요.
+    신고가 돌파 · 거래량 급증) × 손절(-3/-5/-8%) × 익절(+5/7/10/15%) × 최대 보유(제한 없음/5/10일) × 시장 필터(끔/켬)
+    × 보호 규칙(끔/켬)을 돌려요. 조건에 ‘보호’가 붙은 줄이 보호 규칙을 켠 결과예요.
     <b>🔍 코어 포함 비교</b>는 추세 추종에 코어(0/70%)까지 넣어 길게 보는 비교예요. 위의 기간·종목을 그대로 써요.<br>
     <b>신호 설명</b> — 추세 추종: 이동평균이 올라가는 종목을 따라 삼 · 눌림목 반등: 상승 흐름에서 RSI 35 아래로 빠졌다 반등하는 날 사서 RSI 60에 팖 ·
     신고가 돌파: 20일 최고가를 거래량 1.5배 이상으로 넘으면 사고 10일 최저가 밑으로 가면 팖 ·
@@ -81,7 +85,7 @@
     {% for x in shown %}{% set idx = sw.rows.index(x) %}
     <tr {% if idx == pk %}style="background:var(--okbg)"{% endif %}>
       <td>{{ idx + 1 }}{% if idx == pk %}<div style="font-size:11px">추천</div>{% endif %}</td>
-      <td style="font-size:13px">{% if sw.kind == 'short' %}<b>{{ modes.get(x.signal, x.signal) }}</b> · {% endif %}손절 {{ x.stop }}% · 익절 +{{ x.take }}%<div class="mute">{% if sw.kind == 'short' %}최대 {{ (x.max_hold ~ '일') if x.max_hold else '제한 없음' }}{% else %}보유 {{ x.min_hold }}일{% endif %}{{ ' · 필터' if x.market_filter }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회{% if x.avg_trade_pct is defined and x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></td>
+      <td style="font-size:13px">{% if sw.kind == 'short' %}<b>{{ modes.get(x.signal, x.signal) }}</b> · {% endif %}손절 {{ x.stop }}% · 익절 +{{ x.take }}%<div class="mute">{% if sw.kind == 'short' %}최대 {{ (x.max_hold ~ '일') if x.max_hold else '제한 없음' }}{% else %}보유 {{ x.min_hold }}일{% endif %}{{ ' · 필터' if x.market_filter }}{{ ' · 보호' if x.guard }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회{% if x.avg_trade_pct is defined and x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></td>
       <td class="r nw">{{ pct(x.return_pct) }}<div class="mute"><span class="down">{{ "%.1f"|format(x.mdd_pct) }}%</span>{{ ' · 지수↑' if x.bench_pct is not none and x.return_pct > x.bench_pct }}</div></td>
       {% if v %}<td class="r nw">{{ pct(x.oos_return_pct) }}{{ ' ✅' if x.oos_return_pct > 0 }}<div class="mute"><span class="down">{{ "%.1f"|format(x.oos_mdd_pct) }}%</span> · {{ x.oos_n }}회{{ ' · 지수↑' if x.oos_bench_pct is not none and x.oos_return_pct > x.oos_bench_pct }}</div></td>{% endif %}
       <td><form method="post" action="{{ url_for('strategy_apply') }}" class="inline"
@@ -89,6 +93,7 @@
         <input type="hidden" name="stop" value="{{ x.stop }}"><input type="hidden" name="take" value="{{ x.take }}">
         <input type="hidden" name="min_hold" value="{{ x.min_hold }}"><input type="hidden" name="core_pct" value="{{ x.core_pct }}">
         <input type="hidden" name="market_filter" value="{{ '1' if x.market_filter else '0' }}">
+        {% if x.guard is defined %}<input type="hidden" name="guard" value="{{ '1' if x.guard else '0' }}">{% endif %}
         <input type="hidden" name="market" value="{{ market }}">
         <input type="hidden" name="signal" value="{{ x.signal or 'trend' }}"><input type="hidden" name="max_hold" value="{{ x.max_hold or 0 }}">
         <button class="btn" style="padding:4px 9px;font-size:12px;white-space:nowrap">적용</button></form></td></tr>
@@ -105,7 +110,8 @@
 
 {% if r %}
 <div class="card">
-  <h2>결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ r.start[:4] }}-{{ r.start[4:6] }}-{{ r.start[6:] }} ~ {{ r.end[:4] }}-{{ r.end[4:6] }}-{{ r.end[6:] }} {% if r.signal is defined %} · {{ modes.get(r.signal, r.signal) }}{% endif %} · 손절 {{ r.stop }}% · 익절 +{{ r.take }}%{% if r.max_hold %} · 최대 {{ r.max_hold }}일{% endif %}{% if r.min_hold is defined %} · 보유 {{ r.min_hold }}일{% endif %}{% if r.market_filter %} · 시장필터{% endif %}{% if r.core_pct %} · 코어 {{ r.core_pct }}%{% endif %} · {{ r.symbols }}종목</span></h2>
+  <h2>결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ r.start[:4] }}-{{ r.start[4:6] }}-{{ r.start[6:] }} ~ {{ r.end[:4] }}-{{ r.end[4:6] }}-{{ r.end[6:] }} {% if r.signal is defined %} · {{ modes.get(r.signal, r.signal) }}{% endif %} · 손절 {{ r.stop }}% · 익절 +{{ r.take }}%{% if r.max_hold %} · 최대 {{ r.max_hold }}일{% endif %}{% if r.min_hold is defined %} · 보유 {{ r.min_hold }}일{% endif %}{% if r.market_filter %} · 시장필터{% endif %}{% if r.guard %} · 보호 규칙{% endif %}{% if r.core_pct %} · 코어 {{ r.core_pct }}%{% endif %} · {{ r.symbols }}종목</span></h2>
+  {% if r.by_why %}<div class="mute" style="margin-bottom:6px">매도 사유: {% for w, n in r.by_why.items() %}{{ w or '기타' }} {{ n }}회{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
   <div class="stats">
     <div class="stat"><div class="k">봇 전략 수익률</div><div class="v">{{ pct(r.return_pct) }}</div>
       <div class="mute">{{ ('+' if r.pnl >= 0 else '') ~ num(r.pnl, cur) }}</div></div>

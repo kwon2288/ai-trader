@@ -144,6 +144,11 @@ core_us = "SPYM"        # 미국 코어 ETF (S&P 500)
 signal = "trend"        # 매매 신호: trend(추세 추종) · dip(눌림목 반등) · breakout(신고가 돌파) · volume(거래량 급증)
 max_hold_days = 0       # 이 날수가 지나면 수익·손실과 상관없이 정리 — 단기 매매용 (0 = 제한 없음)
 rule_sell = "direct"    # 규칙 매도 신호: direct(AI 확인 없이 바로 매도) · ai(AI 가 확인, ‘유지’면 안 팖)
+guard = true            # 보호 규칙 (시장별로도 가능): 추격 매수 차단 · 돌파 실패 조기 정리 · 이익 보호
+chase_max_ret5 = 12     #   최근 5일 상승률이 이 % 를 넘은 종목은 신호가 나도 안 삼 (0 = 끔)
+protect_at_pct = 5      #   수익이 한 번 이 % 를 넘으면 손절선을 본전으로 (0 = 끔)
+trail_pct = 5           #   그 뒤 고점 대비 이 % 내려오면 정리 (0 = 본전만 지킴)
+late_buy = true         # 신고가 돌파 매수는 그날 마지막 정기 실행에서만 — 장중 가짜 돌파 방지 (시장별로도 가능)
 # 시장별로 따로 쓰려면 아래처럼 (없는 값은 위 [strategy]·[risk] 공통 값). 웹 설정 → 전략에서 저장하면 자동으로 생겨요.
 # [strategy.kr]
 # signal = "breakout"

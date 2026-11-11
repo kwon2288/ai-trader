@@ -8,6 +8,11 @@ config [strategy]
   signal = "trend"        # 매매 신호: trend(추세 추종) · dip(눌림목 반등) · breakout(신고가 돌파) · volume(거래량 급증)
   max_hold_days = 0       # 이 날수가 지나면 수익·손실과 상관없이 정리 (단기 매매용, 0 = 끔)
   rule_sell = "direct"    # 규칙 매도 신호: direct(AI 확인 없이 바로 매도) · ai(AI 가 확인)
+  guard = true            # 보호 규칙 묶음 (시장별): 추격 매수 차단 · 돌파 실패 조기 정리 · 이익 보호
+  chase_max_ret5 = 12     #   최근 5일 상승률이 이 % 를 넘은 종목은 새로 사지 않음 (0 = 끔)
+  protect_at_pct = 5      #   수익이 한 번 이 % 를 넘으면 손절선을 본전으로 올림 (0 = 끔)
+  trail_pct = 5           #   그 뒤로는 고점 대비 이 % 내려오면 정리 (0 = 본전만 지킴)
+  late_buy = true         # 신고가 돌파 매수는 그날 마지막 정기 실행에서만 (장중 가짜 돌파 방지, 시장별)
 
 config [strategy.kr] / [strategy.us] — 시장별로 따로 (없으면 위 [strategy] 값)
   signal · max_hold_days · market_filter · stop_loss_pct · take_profit_pct · min_hold_days
@@ -19,7 +24,11 @@ CORE_DEFAULT = {"kr": "069500", "us": "SPYM"}
 MA_LONG = 200
 
 
-MARKET_KEYS = ("signal", "max_hold_days", "market_filter", "stop_loss_pct", "take_profit_pct", "min_hold_days")
+MARKET_KEYS = ("signal", "max_hold_days", "market_filter", "stop_loss_pct", "take_profit_pct", "min_hold_days",
+               "guard", "late_buy")
+GUARD_DEFAULT = {"chase_max_ret5": 12.0, "protect_at_pct": 5.0, "trail_pct": 5.0}
+FAIL_EXIT_BUFFER_PCT = 1.0      # 돌파선보다 이만큼 더 내려와야 '돌파 실패' (잡음 방지)
+BREAKEVEN_PAD_PCT = 0.5         # 본전 = 평단 + 수수료·세금 몫
 
 
 def merged(raw: dict, market: str) -> dict:
@@ -44,7 +53,14 @@ def settings(cfg) -> dict:
     sig = str(s.get("signal", "trend")).strip()
     from .signals import MODES
     rule_sell = str(s.get("rule_sell", "direct")).strip().lower()
+    nums = {}
+    for k, d in GUARD_DEFAULT.items():
+        try:
+            nums[k] = max(0.0, min(100.0, float(s.get(k, d))))
+        except (TypeError, ValueError):
+            nums[k] = d
     return {"market_filter": bool(s.get("market_filter", False)), "core_pct": core,
+            "guard": bool(s.get("guard", True)), "late_buy": bool(s.get("late_buy", True)), **nums,
             "signal": sig if sig in MODES else "trend", "max_hold_days": max_hold,
             "rule_sell": rule_sell if rule_sell in ("direct", "ai") else "direct",
             "core_code": str(s.get(f"core_{mk}") or CORE_DEFAULT[mk]).strip().upper() if mk == "us"
@@ -70,3 +86,24 @@ def regime(broker, cfg) -> tuple[bool | None, str]:
     except Exception as e:  # noqa: BLE001
         return None, f"지수 조회 실패: {e}"
     return regime_from_bars(bars)
+
+
+def guard_opts(sg: dict, on: bool | None = None) -> dict | None:
+    """보호 규칙 값 (꺼져 있으면 None). on 을 주면 설정의 guard 대신 그 값으로 (백테스트 비교용)."""
+    if not (sg.get("guard", True) if on is None else on):
+        return None
+    return {"chase_max_ret5": sg.get("chase_max_ret5", GUARD_DEFAULT["chase_max_ret5"]), "fail_exit": True,
+            "protect_at": sg.get("protect_at_pct", GUARD_DEFAULT["protect_at_pct"]),
+            "trail": sg.get("trail_pct", GUARD_DEFAULT["trail_pct"])}
+
+
+def protect_floor(avg: float, peak: float, opts: dict | None) -> float | None:
+    """이익 보호선: 수익이 protect_at % 를 넘은 적이 있으면 max(본전, 고점 − trail %). 아직 아니면 None."""
+    if not opts or not opts.get("protect_at") or not avg or not peak:
+        return None
+    if (peak / avg - 1) * 100 < opts["protect_at"]:
+        return None
+    floor = avg * (1 + BREAKEVEN_PAD_PCT / 100)
+    if opts.get("trail"):
+        floor = max(floor, peak * (1 - opts["trail"] / 100))
+    return floor

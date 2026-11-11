@@ -75,7 +75,7 @@ def test_sweep_has_out_of_sample():
         def quote(self, code):
             return type("Q", (), {"name": code})()
     sw = backtest.sweep(cfg, B(), 300, ["000001"], "000001", kind="short",
-                        grid={"signal": ["trend", "dip"], "stop": [-5], "take": [7], "max_hold": [0], "market_filter": [False]})
+                        grid={"signal": ["trend", "dip"], "stop": [-5], "take": [7], "max_hold": [0], "market_filter": [False], "guard": [False]})
     assert sw["split"] and sw["validation"]["top"] == 2
     x = sw["rows"][0]
     assert "oos_return_pct" in x and x["oos_n"] >= 0

@@ -71,11 +71,11 @@ def test_short_sweep():
         def quote(self, code):
             return type("Q", (), {"name": code})()
     sw = backtest.sweep(cfg, B(), 250, ["000001"], "069500", kind="short",
-                        grid={"stop": [-5], "take": [7], "max_hold": [0, 5], "market_filter": [False]})
+                        grid={"stop": [-5], "take": [7], "max_hold": [0, 5], "market_filter": [False], "guard": [False]})
     assert sw["kind"] == "short" and len(sw["rows"]) == 8                           # 신호 4 × 최대 보유 2
     assert {x["signal"] for x in sw["rows"]} == set(signals.MODES)
     assert len(sw["best_by_signal"]) == 4 and all(x["core_pct"] == 0 for x in sw["rows"])
-    assert backtest.grid_size(backtest.SHORT_GRID) == 288
+    assert backtest.grid_size(backtest.SHORT_GRID) == 576      # 보호 규칙 끔/켬 포함
 
 
 def test_bot_max_hold_exit_and_rules_mode():

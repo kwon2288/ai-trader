@@ -199,7 +199,12 @@ def pnl():
     ai["net"] = round(r["pnl"] - ai["local"], 2)
     if cmp_ and snap_budget(j, c):
         ai["net_pct"] = round(cmp_["bot_pct"] - ai["local"] / snap_budget(j, c) * 100, 2)
-    return render_template("pnl.html", c=c, base=base, market=m, r=r, periods=PERIODS, p=p, cmp=cmp_, ai=ai,
+    from trader import scorecard
+    try:
+        card = scorecard.summary(j, c.ledger) if c.ai_hybrid else None
+    except Exception:  # noqa: BLE001
+        card = None
+    return render_template("pnl.html", c=c, base=base, market=m, r=r, card=card, periods=PERIODS, p=p, cmp=cmp_, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
                            snap=j.snapshot(c.ledger))
 

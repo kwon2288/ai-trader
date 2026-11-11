@@ -89,7 +89,7 @@ def test_backtest_core_and_filter_and_sweep():
     os.environ["TRADER_DATA_DIR"] = str(cfg.data_dir)
     cfg.strategy = {"core_kr": "069500"}
     sw = backtest.sweep(cfg, B(), 250, ["000001"], "069500",
-                        grid={"stop": [-5, -10], "take": [10], "min_hold": [2], "market_filter": [False],
+                        grid={"stop": [-5, -10], "take": [10], "min_hold": [2], "market_filter": [False], "guard": [False],
                               "core_pct": [0, 70]})
     assert len(sw["rows"]) == 4 and sw["rows"][0]["score"] >= sw["rows"][-1]["score"]
     assert backtest.load_sweep(cfg.data_dir, "kr")["rows"]

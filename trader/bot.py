@@ -63,6 +63,26 @@ def near_close(market: str, at=None) -> int:
     return left if 0 < left <= CLOSE_WINDOW_MIN else 0
 
 
+def last_slot_wait(cfg, at=None) -> str | None:
+    """오늘 마지막 정기 실행 시각이 아직 안 됐으면 그 시각 'HH:MM'(그 시장 시간), 됐으면 None.
+    정기 실행 시각을 모르면 None (제한하지 않음)."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from . import schedule
+    try:
+        import tomllib
+        from .config import ensure_config
+        raw = tomllib.loads(ensure_config().read_text(encoding="utf-8"))
+        slots = schedule.as_tuples(schedule.times(raw, cfg.market))
+    except Exception:  # noqa: BLE001
+        return None
+    if not slots:
+        return None
+    hh, mm = max(slots)
+    t = (at or _dt.now(ZoneInfo(schedule.TZ[cfg.market]))).astimezone(ZoneInfo(schedule.TZ[cfg.market]))
+    return f"{hh:02d}:{mm:02d}" if t.hour * 60 + t.minute < hh * 60 + mm - 5 else None
+
+
 def account_label(scope: str | None) -> str:
     """'nh/live' → '나무 실계좌'."""
     if not scope:
@@ -201,7 +221,7 @@ class Bot:
             h = held[c]
             d = {"code": c, "action": "SELL", "confidence": s["strength"], "sell_ratio": 1.0,
                  "reason": f"[규칙 매도 · {signals.label(strategy_mode(cfg))} — AI 확인 없이] {s['reason']}"}
-            if self.j.held_days(c) < cfg.min_hold_days:
+            if self.j.held_days(c) < cfg.min_hold_days and not s.get("urgent"):      # 돌파 실패는 바로 정리
                 outcome = f"보류 (최소 보유 {cfg.min_hold_days}일 미달)"
             elif analyze_only:
                 outcome = "분석 전용 — 주문 안 함"
@@ -249,13 +269,37 @@ class Bot:
                                     f"(한도 {limit}%). 오늘은 새로 사지 않아요.")
 
     # ── 손절·익절 (정기 실행과 장중 감시가 함께 씀) ─────────
-    def _exit_trigger(self, h) -> str | None:
+    def _exit_trigger(self, h, code: str | None = None, track: bool = True) -> str | None:
         pnl = round(h.pnl_pct, 6)              # 부동소수 오차(14.9999…%) 방지
         if pnl <= self.cfg.stop_loss_pct:
             return "손절"
         if pnl >= self.cfg.take_profit_pct:
             return "익절"
+        if code and self._protect_hit(code, h, track):
+            return "이익 보호"
         return None
+
+    def _protect_hit(self, code: str, h, track: bool = True) -> bool:
+        """이익 보호: 보유 중 고점을 기록해 두고, 수익이 protect_at % 를 넘은 적이 있으면
+        max(본전, 고점 − trail %) 아래로 내려올 때 정리한다 (설정 → 전략 → 보호 규칙)."""
+        from . import strategy
+        opts = strategy.guard_opts(strategy.settings(self.cfg))
+        if not opts or not opts.get("protect_at") or not h.avg_price or not h.now_price:
+            return False
+        key = f"peak_{self.cfg.ledger}_{code}"
+        opened = self.j.bot_codes(self.cfg.market).get(code) or ""
+        saved = (self.j.get(key) or "").split("|")
+        peak = float(saved[1]) if len(saved) == 2 and saved[0] == opened else float(h.avg_price)   # 새로 산 종목은 처음부터
+        if h.now_price > peak or len(saved) != 2 or saved[0] != opened:
+            peak = max(peak, float(h.now_price))
+            if track:
+                self.j.set(key, f"{opened}|{peak}")
+        floor = strategy.protect_floor(float(h.avg_price), peak, opts)
+        if floor and h.now_price <= floor:
+            self.say(f"🛡 {h.name} 고점 {self.cfg.money(peak)}({(peak / h.avg_price - 1) * 100:+.1f}%)까지 갔다가 "
+                     f"보호선 {self.cfg.money(floor)} 아래로 내려옴")
+            return True
+        return False
 
     def _rule_exits(self, held: dict, prices: dict, bids: dict, tag: str = "") -> int:
         """손절은 시장가로, 하루 주문 한도와 상관없이 판다. 익절은 설정한 주문 방식·한도를 따른다."""
@@ -263,7 +307,7 @@ class Bot:
         max_hold = strategy.settings(self.cfg)["max_hold_days"]
         n = 0
         for c, h in list(held.items()):
-            trig = self._exit_trigger(h)
+            trig = self._exit_trigger(h, c)
             if not trig and max_hold and self.j.held_days(c) != 999 and self.j.held_days(c) >= max_hold:
                 trig = "보유기간 만료"
                 self.say(f"📏 {h.name} {self.j.held_days(c)}일 보유 (최대 {max_hold}일) → 정리")
@@ -272,7 +316,7 @@ class Bot:
             if trig != "보유기간 만료":
                 self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig}{tag} 규칙 발동")
             qty = min(h.qty, self.broker.sellable_qty(c)) if self.cfg.mode != "dry" else h.qty
-            stop = trig == "손절"
+            stop = trig in ("손절", "이익 보호")           # 지키는 매도는 시장가로, 하루 주문 한도와 상관없이
             if qty > 0 and self._exec("SELL", c, h.name, qty, bids.get(c) or prices.get(c) or h.now_price, trig + tag,
                                       force_market=stop, ignore_cap=stop):
                 n += 1
@@ -361,6 +405,8 @@ class Bot:
             fills.reconcile(self.j, cfg, self.broker, self.say, notify=self.notify,
                             cancel_before=None if analyze_only else now().isoformat(timespec="seconds"))
             fills.sync_settled_fx(self.j, cfg, self.broker, self.say)      # 토스: 결제 환율로 확정
+            from . import scorecard
+            scorecard.update(self.j, cfg, self.broker, self.say)           # AI 성적표: 지난 신호의 이후 수익률
         except Exception as e:  # noqa: BLE001
             self.say(f"⚠ 체결 확인 중 오류: {e}")
 
@@ -526,12 +572,27 @@ class Bot:
         # 2-3) 하루 손실 한도: 그날 첫 실행 때의 봇 자산 대비 예산의 N% 넘게 빠지면 그날은 새로 사지 않음
         self._daily_loss_check(st)
 
+        # 2-4) 신고가 돌파: 장중 가격으로는 가짜 돌파가 많다 → 매수는 그날 마지막 정기 실행에서만
+        gopts = strategy.guard_opts(sg)
+        if sg["signal"] == "breakout":
+            if sg["late_buy"] and not self.no_buy_reason and not force:      # 직접 누른 강제 실행은 예외
+                last = last_slot_wait(cfg)
+                if last:
+                    self.no_buy_reason = f"돌파 매수는 그날 마지막 실행({last})에서만"
+                    self.say(f"⏳ {self.no_buy_reason} — 장중 가짜 돌파를 피하려고 지금은 새로 사지 않아요 (매도는 그대로)")
+            for c in candidates:                       # 돌파해서 산 종목: 살 때의 돌파선 (돌파 실패 판단용)
+                if c["held"]:
+                    try:
+                        c["breakout_level"] = float(self.j.get(f"bo_level_{cfg.ledger}_{c['code']}") or 0) or None
+                    except ValueError:
+                        c["breakout_level"] = None
+
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
         if not analyze_only:
             self._rule_exits(held, {c: q.price for c, q in quotes.items()}, {c: q.bid for c, q in quotes.items()})
         else:
             for c, h in held.items():
-                trig = self._exit_trigger(h)
+                trig = self._exit_trigger(h, c, track=False)
                 if trig:
                     self.say(f"📏 {h.name} 수익률 {h.pnl_pct:+.2f}% → {trig} 규칙 (분석 전용 — 주문 안 함)")
 
@@ -544,7 +605,11 @@ class Bot:
             cheapest = min((c["price"] for c in candidates if not c["held"] and c["affordable"]), default=0)
             can_buy = (len(held) < cfg.max_positions and cheapest > 0 and cash_now >= cheapest
                        and not self.no_buy_reason)
-            sig = signals.evaluate(candidates, can_buy=can_buy, mode=sg["signal"])
+            skipped: list = []
+            sig = signals.evaluate(candidates, can_buy=can_buy, mode=sg["signal"], opts=gopts, skipped=skipped)
+            if skipped:
+                self.say("🚫 추격 매수 차단 — 이미 많이 오른 신호는 건너뜀: "
+                         + ", ".join(f"{c['name']}({why})" for c, why in skipped))
             if sg["rule_sell"] == "direct":
                 n_sold = self._direct_rule_sells(sig, held, quotes, run_id, analyze_only)
                 if n_sold is not None and not sig:
@@ -588,6 +653,7 @@ class Bot:
                 "min_hold_days": cfg.min_hold_days,
                 "max_hold_days": sg["max_hold_days"],
                 "signal_mode": sg["signal"],
+                "signal_opts": gopts,
             },
             "portfolio": {
                 "cash": self.avail,
@@ -670,6 +736,19 @@ class Bot:
             if ok and qty >= h.qty:
                 held.pop(c)
 
+        if allowed is not None and not analyze_only:      # AI 성적표: 규칙 매수 신호를 AI 가 통과/차단했는지 남김
+            try:
+                from . import scorecard
+                ai_buy = {d["code"] for d in decisions if d.get("action") == "BUY"
+                          and d["confidence"] >= cfg.min_confidence}
+                for c in candidates:
+                    if not c["held"] and c["code"] in allowed:
+                        scorecard.record(self.j, cfg.ledger, cfg.market, c["code"], c["name"], c["price"],
+                                         c["code"] in ai_buy, c.get("rule_signal", ""))
+            except Exception as e:  # noqa: BLE001
+                log.warning("AI 성적표 기록 실패: %s", e)
+        levels = {c["code"]: c.get("high_20d_prev") for c in candidates} if sg["signal"] == "breakout" else {}
+
         cash = self.avail
         buys = sorted([d for d in decisions if d.get("action") == "BUY"], key=lambda d: -d["confidence"])
         for d in buys:
@@ -704,6 +783,7 @@ class Bot:
             ok = self._exec("BUY", c, q.name, qty, est, "AI")
             note(d, "매수 실행" if ok else "매수 실패")
             if ok:
+                self.j.set(f"bo_level_{cfg.ledger}_{c}", str(levels.get(c) or ""))     # 돌파선 (돌파 실패 판단용)
                 cash -= qty * est
                 held[c] = None  # 보유 종목 수 카운트용
 
