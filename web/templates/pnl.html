@@ -76,16 +76,16 @@
 <div class="card">
   <h2>매도 내역</h2>
   {% if r.trades %}
-  <div class="scroll"><table>
-    <tr><th>날짜</th><th>종목</th><th class="r">수량</th><th class="r">평단 → 매도</th><th class="r">손익</th></tr>
+  <div class="scroll"><table class="sells">
+    <tr><th>날짜</th><th>종목</th><th class="r">평단 → 매도</th><th class="r">손익</th></tr>
     {% for tr in r.trades %}
-    <tr><td class="nw">{{ tr.ts[5:10] }}<div class="mute">{{ tr.ts[11:16] }}</div>{% if tr.date != tr.ts[:10] %}<div class="mute" style="font-size:11px">거래일 {{ tr.date[5:] }}</div>{% endif %}</td>
-      <td>{{ tr.name }}<div class="mute">{{ tr.code }}</div></td><td class="r">{{ tr.qty|int if tr.qty == (tr.qty|int) else tr.qty }}</td>
-      {% if tr.cur == 'USD' and market == 'all' %}<td class="r nw">{{ money(tr.avg, 'USD') }}<div class="mute">→ {{ money(tr.price, 'USD') }}</div></td>
-      {% else %}<td class="r nw">{{ num(tr.avg, cur) }}<div class="mute">→ {{ num(tr.price, cur) }}</div></td>{% endif %}
-      <td class="r nw">{{ pct(tr.pnl_pct) }}<div class="mute">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div>
-        {% if tr.cur == 'USD' and market == 'all' %}<div class="mute" style="font-size:11px">{{ money(tr.pnl_native, 'USD') }} · 환율 {{ "{:,.0f}".format(tr.fx) }}</div>{% endif %}
-        <div class="mute" style="font-size:11px">비용 {{ num(tr.cost, cur) }}</div></td></tr>
+    {% set qcur = 'USD' if (tr.cur == 'USD' and market == 'all') else cur %}
+    <tr><td class="nw">{{ tr.ts[5:10] }}<div class="mute">{{ tr.ts[11:16] }}</div>{% if tr.date != tr.ts[:10] %}<div class="mute sm">거래일 {{ tr.date[5:] }}</div>{% endif %}</td>
+      <td>{{ tr.name }}<div class="mute">{{ tr.code }} · {{ tr.qty|int if tr.qty == (tr.qty|int) else tr.qty }}주</div></td>
+      <td class="r nw">{{ money(tr.avg, 'USD') if qcur == 'USD' else num(tr.avg, cur) }}<div class="mute">→ {{ money(tr.price, 'USD') if qcur == 'USD' else num(tr.price, cur) }}</div></td>
+      <td class="r"><span class="nw">{{ pct(tr.pnl_pct) }}</span><div class="mute nw">{{ ('+' if tr.pnl > 0 else '') ~ num(tr.pnl, cur) }}</div>
+        {% if tr.cur == 'USD' and market == 'all' %}<div class="mute sm">{{ money(tr.pnl_native, 'USD') }}<br>환율 {{ "{:,.0f}".format(tr.fx) }}</div>{% endif %}
+        <div class="mute sm">비용 {{ num(tr.cost, cur) }}</div></td></tr>
     {% endfor %}
   </table></div>
   {% else %}<div class="mute">없음</div>{% endif %}

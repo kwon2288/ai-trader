@@ -256,8 +256,9 @@ def test_fees_and_tax_reduce_realized_pnl():
     j.add_order("mock", "SELL", "000008", "KODEX 200", 10, 11_000, R(True, "4", "ok"), "AI", status="filled")
     t = {x["name"]: x for x in ledger.trades(j, "mock", ledger.costs_of(cfg))}
     # 주식: 수수료 0.015% ×(10만+11만) + 거래세 0.20% × 11만 = 31.5 + 220
-    assert abs(t["삼성전자"]["pnl"] - (10_000 - 31.5 - 220)) < 0.01
-    assert abs(t["KODEX 200"]["pnl"] - (10_000 - 31.5)) < 0.01        # ETF 는 거래세 없음
+    # 원화 손익은 건별로 원 단위 반올림 (화면 합계가 건별 금액 합과 1원도 안 어긋나게)
+    assert abs(t["삼성전자"]["pnl"] - (10_000 - 31.5 - 220)) <= 0.5 and isinstance(t["삼성전자"]["pnl"], int)
+    assert abs(t["KODEX 200"]["pnl"] - (10_000 - 31.5)) <= 0.5        # ETF 는 거래세 없음
     # 증권사가 실제 수수료·세금을 주면 그 값을 쓴다
     j.db.execute("UPDATE orders SET fee=10, tax=0 WHERE order_no IN ('1','2')")
     t = {x["name"]: x for x in ledger.trades(j, "mock", ledger.costs_of(cfg))}

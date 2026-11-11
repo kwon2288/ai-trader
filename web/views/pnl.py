@@ -156,8 +156,14 @@ def _pnl_all(base, p, f, t, start, end):
     snap = None
     sk, su = j.snapshot(kr.ledger) or {}, j_us.snapshot(us.ledger) or {}
     if sk.get("budget") is not None or su.get("budget") is not None:
-        snap = {k: float(sk.get(k) or 0) + float(su.get(k) or 0) * fx for k in ("budget", "unrealized", "pnl")}
-        snap["pnl_pct"] = snap["pnl"] / snap["budget"] * 100 if snap["budget"] else 0.0
+        # 누적 손익 = 실현(전체 기간, 미국은 거래 당시 환율) + 지금 보유 평가(최근 환율).
+        # 스냅숏의 실현 값은 봇이 마지막으로 돈 시점 것이라 위 실현 손익과 어긋날 수 있어 매도 기록에서 다시 계산한다.
+        real_kr = sum(t["pnl"] for t in ledger.trades(j, kr.ledger, ledger.costs_of(kr)))
+        real_us = sum(t["pnl_krw"] for t in ledger.trades(j_us, us.ledger, ledger.costs_of(us)))
+        unreal = round(float(sk.get("unrealized") or 0) + float(su.get("unrealized") or 0) * fx)
+        budget = round(float(sk.get("budget") or 0) + float(su.get("budget") or 0) * fx)
+        snap = {"budget": budget, "unrealized": unreal, "pnl": round(real_kr + real_us + unreal)}
+        snap["pnl_pct"] = snap["pnl"] / budget * 100 if budget else 0.0
     split = {"kr": r_kr["pnl"], "us": r_us["pnl"], "us_krw": r_us["pnl_krw"],
              "fx_gain": r_us["pnl_krw"] - round(r_us["pnl"] * fx)}
     return render_template("pnl.html", c=kr, base=base, market="all", r=r, periods=PERIODS, p=p, cmp=None, ai=ai,

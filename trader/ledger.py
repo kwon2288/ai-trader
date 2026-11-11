@@ -53,6 +53,11 @@ def day_of(ts: str, ledger: str) -> str:
         return ts[:10]
 
 
+def _r(x: float, us: bool):
+    """거래 한 건 금액 반올림 — 원화는 원 단위, 달러는 센트. 화면의 건별 금액과 합계가 1원도 어긋나지 않게."""
+    return round(x, 2) if us else int(round(x))
+
+
 def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
     """봇의 매도 체결마다 실현 손익 (주문 기록을 처음부터 평균단가로 계산, 수수료·세금 차감)."""
     costs = costs or DEFAULT_COSTS
@@ -83,7 +88,7 @@ def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
         pnl_krw = (px * sold - ft) * fx - avg_k * sold    # 원화 손익 = 매도 당시 환율 원화 − 매수 당시 환율 원가 (환차손익 포함)
         out.append({"ts": o["ts"], "date": day_of(o["ts"], ledger), "fx": fx if us else None,
                     "pnl_krw": round(pnl_krw), "cost_krw": round(ft * fx), "code": o["code"], "name": o["name"], "qty": sold,
-                    "price": px, "avg": round(avg, 4), "pnl": round(pnl, 2), "cost": round(ft, 2),
+                    "price": px, "avg": round(avg, 4), "pnl": _r(pnl, us), "cost": _r(ft, us),
                     "pnl_pct": round(((px * sold - ft) / (avg * sold) - 1) * 100, 2) if avg else 0.0})
         nq = max(0, q - sold)
         pos[o["code"]] = [nq, avg * nq, avg_k * nq]

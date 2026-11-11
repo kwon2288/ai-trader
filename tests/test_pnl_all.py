@@ -106,8 +106,24 @@ def test_page_has_all_tab():
         webapp.cfg = orig
 
 
+def test_krw_totals_match_per_trade_display():
+    """화면 사례: LG유플러스 -2,744 · HMM -3,206 → 국내 합계는 -5,950 (소수점 합 -5,949.x 반올림이 아니라)."""
+    j = Journal(Path(tempfile.mkdtemp()) / "j.db")
+    _fill(j, "mock", "BUY", "011200", "HMM", 2, 23_250)
+    _fill(j, "mock", "SELL", "011200", "HMM", 2, 21_650)
+    _fill(j, "mock", "BUY", "032640", "LG유플러스", 2, 16_790)
+    _fill(j, "mock", "SELL", "032640", "LG유플러스", 2, 15_420)
+    costs = {"kr_fee_pct": 0.0043, "kr_sell_tax_pct": 0.15, "us_fee_pct": 0.09}
+    r = ledger.period(j, "mock", None, None, costs)
+    each = [t["pnl"] for t in r["trades"]]
+    assert all(isinstance(x, int) for x in each)
+    assert r["pnl"] == sum(each) == sum(b["pnl"] for b in r["by_code"]) == sum(v for _, v in r["by_day"])
+    assert ledger.realized_total(j, "mock", costs) == r["pnl"]
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_"):
             v()
     print("ok")
+
