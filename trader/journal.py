@@ -33,6 +33,7 @@ def now() -> datetime:
 class Journal:
     def __init__(self, path: Path):
         self.broker: str | None = None     # 지금 쓰는 증권사 — 정하면 봇 장부를 그 증권사 것만 본다 (use_broker)
+        self.setver: dict[str, int] = {}    # 장부 → 지금 설정 버전 (봇이 실행 시작 때 정함, 주문에 붙임)
         self.db = sqlite3.connect(path, timeout=15)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
@@ -52,7 +53,8 @@ class Journal:
                     "ALTER TABLE bot_positions ADD COLUMN broker TEXT",
                     # 주문 당시 환율 (v0.25): 미국 손익을 원화로 볼 때 그때 환율로
                     "ALTER TABLE orders ADD COLUMN fx REAL",
-                    "ALTER TABLE orders ADD COLUMN fx_settled INTEGER"):       # 1 = 증권사 결제 환율로 확정 (토스)                   # 봇 평단                    # 종목명  # 국내/미국
+                    "ALTER TABLE orders ADD COLUMN fx_settled INTEGER",          # 1 = 증권사 결제 환율로 확정 (토스)
+                    "ALTER TABLE orders ADD COLUMN setver INTEGER"):             # 주문 때의 설정 버전 (setver.py)
             try:
                 self.db.execute(sql)
                 self.db.commit()
@@ -151,9 +153,10 @@ class Journal:
                 fx = None
         cur = self.db.execute(
             "INSERT INTO orders(ts,mode,side,code,name,qty,est_price,order_no,ok,message,trigger,status,filled_qty,"
-            "fill_price,fx) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+            "fill_price,fx,setver) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 now().isoformat(timespec="seconds"), mode, side, code, name, qty, est_price,
-                res.order_no, int(res.ok), res.message, trigger, status, filled, est_price if filled else None, fx))
+                res.order_no, int(res.ok), res.message, trigger, status, filled, est_price if filled else None, fx,
+                self.setver.get(mode)))
         self.db.commit()
         return cur.lastrowid
 

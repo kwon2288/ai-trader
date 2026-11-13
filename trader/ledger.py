@@ -62,6 +62,8 @@ def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
     """봇의 매도 체결마다 실현 손익 (주문 기록을 처음부터 평균단가로 계산, 수수료·세금 차감)."""
     costs = costs or DEFAULT_COSTS
     pos: dict[str, list] = {}           # code → [qty, cost(수수료 포함), 원화 원가(미국: 매수 당시 환율)]
+    entry: dict[str, tuple] = {}        # code → (처음 살 때 설정 버전, 매수 사유) — 설정별·진입 경로별 손익용
+    from .setver import exit_reason
     out = []
     us = ledger.endswith("_us")
     try:
@@ -79,6 +81,8 @@ def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
         fx = (o.get("fx") or fx_now) if us else 1.0    # 환율 기록 이전 주문은 최근 환율로
         q, c, ck = pos.get(o["code"], [0, 0.0, 0.0])
         if o["side"] == "BUY":
+            if q <= 0:
+                entry[o["code"]] = (o.get("setver"), o.get("trigger") or "")
             pos[o["code"]] = [q + qty, c + qty * px + ft, ck + (qty * px + ft) * fx]
             continue
         avg = c / q if q else px                       # 기록 없는 매도(예전 데이터)는 손익 0 으로
@@ -89,10 +93,29 @@ def trades(j, ledger: str, costs: dict | None = None) -> list[dict]:
         out.append({"ts": o["ts"], "date": day_of(o["ts"], ledger), "fx": fx if us else None,
                     "pnl_krw": round(pnl_krw), "cost_krw": round(ft * fx), "code": o["code"], "name": o["name"], "qty": sold,
                     "price": px, "avg": round(avg, 4), "pnl": _r(pnl, us), "cost": _r(ft, us),
-                    "pnl_pct": round(((px * sold - ft) / (avg * sold) - 1) * 100, 2) if avg else 0.0})
+                    "pnl_pct": round(((px * sold - ft) / (avg * sold) - 1) * 100, 2) if avg else 0.0,
+                    "setver": entry.get(o["code"], (None, ""))[0], "buy_trigger": entry.get(o["code"], (None, ""))[1],
+                    "exit": exit_reason(o.get("trigger"))})
         nq = max(0, q - sold)
         pos[o["code"]] = [nq, avg * nq, avg_k * nq]
     return out
+
+
+def _group(ts: list[dict], key) -> list[dict]:
+    """거래를 key 로 묶어 {key, n, wins, pnl, pnl_krw, avg_pct} — 손익 큰 순."""
+    g: dict = {}
+    for t in ts:
+        k = key(t)
+        x = g.setdefault(k, {"key": k, "n": 0, "wins": 0, "pnl": 0.0, "pnl_krw": 0, "sum_pct": 0.0})
+        x["n"] += 1
+        x["wins"] += int(t["pnl"] > 0)
+        x["pnl"] = round(x["pnl"] + t["pnl"], 2)
+        x["pnl_krw"] += t["pnl_krw"]
+        x["sum_pct"] += t["pnl_pct"]
+    for x in g.values():
+        x["avg_pct"] = round(x.pop("sum_pct") / x["n"], 2)
+        x["win_rate"] = round(x["wins"] / x["n"] * 100)
+    return sorted(g.values(), key=lambda x: -x["pnl_krw"])
 
 
 def realized_total(j, ledger: str, costs: dict | None = None) -> float:
@@ -261,6 +284,7 @@ def period(j, ledger: str, start: date | None, end: date | None, costs: dict | N
             buys["amt"] += amt or 0
             buys["amt_krw"] += (amt or 0) * ((o_fx or fx_now) if ledger.endswith("_us") else 1.0)
     return {"trades": list(reversed(ts)), "pnl": round(sum(t["pnl"] for t in ts), 2), "n": len(ts),
+            "by_version": _group(ts, lambda t: t["setver"]), "by_exit": _group(ts, lambda t: t["exit"]),
             "costs": round(sum(t["cost"] for t in ts), 2),
             "wins": len(wins), "win_rate": round(len(wins) / len(ts) * 100, 1) if ts else None,
             "best": max(ts, key=lambda t: t["pnl_pct"]) if ts else None,       # 화면에 %로 보여 주니 % 기준으로

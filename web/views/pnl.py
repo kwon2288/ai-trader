@@ -132,6 +132,45 @@ def combine(parts: list[tuple[dict, str]]) -> dict:
             "by_day": sorted(by_day.items()), "buys": buys, "buy_amount": round(buy_amt)}
 
 
+def _attribution(parts: list[tuple]) -> dict:
+    """설정 버전별 · 매도 사유별 손익. parts: [(r(ledger.period), journal, 장부, 통화, 표시 이름)]
+    거래는 처음 살 때의 설정 버전으로 묶는다 (그 설정이 고른 종목의 결과)."""
+    from trader import setver
+    versions, exits = [], {}
+    for r, j, led, cur, flag in parts:
+        vmap = setver.all_for(j, led)
+        seen = set()
+        for g in r.get("by_version", []):
+            v = vmap.get(g["key"])
+            seen.add(g["key"])
+            versions.append({**g, "cur": cur, "flag": flag, "no": v["no"] if v else None,
+                             "label": v["label"] if v else "설정 기록 전에 산 거래",
+                             "since": v["ts"][:10] if v else None, "changed": v["changed"] if v else [],
+                             "entry": setver.ENTRY_LABEL.get(v["entry"], "") if v else "",
+                             "latest": bool(v) and v["id"] == max(vmap)})
+        if vmap and max(vmap) not in seen:            # 지금 설정은 아직 판 게 없어도 보여 줌
+            v = vmap[max(vmap)]
+            versions.append({"key": v["id"], "n": 0, "wins": 0, "pnl": 0, "pnl_krw": 0, "avg_pct": None,
+                             "win_rate": None, "cur": cur, "flag": flag, "no": v["no"], "label": v["label"],
+                             "since": v["ts"][:10], "changed": v["changed"],
+                             "entry": setver.ENTRY_LABEL.get(v["entry"], ""), "latest": True})
+        for g in r.get("by_exit", []):
+            x = exits.setdefault(g["key"], {"key": g["key"], "n": 0, "wins": 0, "pnl": 0.0, "pnl_krw": 0,
+                                            "sum": 0.0, "cur": cur})
+            x["n"] += g["n"]
+            x["wins"] += g["wins"]
+            x["pnl"] += g["pnl"]
+            x["pnl_krw"] += g["pnl_krw"]
+            x["sum"] += g["avg_pct"] * g["n"]
+            if x["cur"] != cur:
+                x["cur"] = "mixed"
+    for x in exits.values():
+        x["avg_pct"] = round(x.pop("sum") / x["n"], 2) if x["n"] else None
+        x["win_rate"] = round(x["wins"] / x["n"] * 100) if x["n"] else None
+    versions.sort(key=lambda v: (v["flag"], -(v["no"] or 0)))
+    return {"versions": versions, "exits": sorted(exits.values(), key=lambda x: -x["pnl_krw"])}
+
+
 def _pnl_all(base, p, f, t, start, end):
     """국내 + 미국 통합 (원화). 미국 실현 손익은 거래 당시 환율, 보유 평가·AI 비용은 최근 환율로 환산."""
     from trader import ledger, pricing
@@ -174,9 +213,10 @@ def _pnl_all(base, p, f, t, start, end):
             x = None
         if x:
             cmps.append({**x, "flag": flag})
+    attr = _attribution([(r_kr, j, kr.ledger, "KRW", "🇰🇷"), (r_us, j_us, us.ledger, "USD", "🇺🇸")])
     return render_template("pnl.html", c=kr, base=base, market="all", r=r, periods=PERIODS, p=p, cmp=None, cmps=cmps, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
-                           snap=snap, split=split, fx=fx)
+                           snap=snap, split=split, fx=fx, attr=attr)
 
 
 @app.get("/pnl")
@@ -218,9 +258,10 @@ def pnl():
         card = scorecard.summary(j, c.ledger) if c.ai_hybrid else None
     except Exception:  # noqa: BLE001
         card = None
+    attr = _attribution([(r, j, c.ledger, c.currency, "")])
     return render_template("pnl.html", c=c, base=base, market=m, r=r, card=card, periods=PERIODS, p=p, cmp=cmp_, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
-                           snap=j.snapshot(c.ledger))
+                           snap=j.snapshot(c.ledger), attr=attr)
 
 
 def snap_budget(j, c) -> float:

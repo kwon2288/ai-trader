@@ -111,6 +111,11 @@ class Bot:
         self.j = journal or Journal(cfg.db_path)
         from .runner import broker_name
         self.j.use_broker(broker_name(cfg), cfg.market, cfg.mode)
+        try:                                              # 설정 버전 — 이 실행의 주문에 붙여 둠 (설정별 손익)
+            from . import setver
+            self.j.setver[cfg.ledger] = setver.current(self.j, cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("설정 버전 기록 실패: %s", e)
         self.lines: list[str] = []
         self.orders_left = 0
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수

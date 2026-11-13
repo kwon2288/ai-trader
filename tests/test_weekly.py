@@ -85,7 +85,7 @@ def test_weekly_text():
         j.add_order(L, "SELL", code, nm, 2, sell, OK, "규칙", "filled")
     today = now().date()
     mon = today - timedelta(days=today.weekday())
-    txt = runner.weekly_text(cfg, mon, mon + timedelta(days=4))
+    txt = runner.weekly_text(cfg, mon, max(today, mon + timedelta(days=4)))      # 주말에 돌려도 오늘 주문이 들어가게
     assert txt.startswith(f"🗓 주간 리포트 ({mon:%m/%d}~") and "🇰🇷 국내 — 매수 2건 · 매도 2건" in txt
     assert "승률 50% (1승 1패)" in txt and "최고 가 +5.0%" in txt and "최저 나 -8.0%" in txt
     assert "-600원" in txt and "🇺🇸" not in txt
