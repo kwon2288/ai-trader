@@ -50,6 +50,7 @@ MODEL_FIELDS = [  # (설정키, 라벨, 추천 목록)
     ]),
     ("gemini_model", "Gemini 모델", [
         ("gemini-3.8-flash", "3.8 Flash · 기본 (무료 ~20회/일)"),
+        ("gemini-4-hydrogen", "4 Hydrogen · 신형 (3.8 Flash 보다 빠름, 단가 2배)"),
         ("gemini-3.5-flash-lite", "3.5 Flash-Lite · 저렴 (무료 ~500회/일)"),
         ("gemini-4-argon", "4 Argon · 고성능"),
     ]),

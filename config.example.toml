@@ -38,7 +38,7 @@ provider = "claude"
 hybrid = true
 news = false        # AI 에 최근 뉴스 제목·공시(DART)도 함께 보내기 — 웹 설정 → AI 에서 켜고 끔
 claude_model = "claude-sonnet-5-5"   # 저렴: claude-haiku-5-5
-gemini_model = "gemini-3.8-flash"    # 저렴: gemini-3.5-flash-lite
+gemini_model = "gemini-3.8-flash"    # 저렴: gemini-3.5-flash-lite · 신형: gemini-4-hydrogen
 openai_model = "gpt-6.1-sol"         # 저렴: gpt-6-luna
 max_tokens = 4000
 # 다수결에서 한 AI 가 실패(혼잡 503 등)하면 대신 물어볼 예비 AI — 추가 결제 없이 Claude 키로
