@@ -236,6 +236,36 @@ def test_votes_readable_one_line_per_ai():
         [(None, "[다수결 2/3 · Claude 매수 · Gemini 매수 · ChatGPT 유지]"), ("Claude", "좋음"), ("Gemini", "50/50")]
     assert A.ai_lines("단일 AI 이유") == [(None, "단일 AI 이유")] and A.ai_lines(None) == []
 
+def test_gemini_thinking_level_sent_and_falls_back():
+    """설정한 생각 수준을 보내고, 모델이 거부(400)하면 생각 수준 없이 한 번 더."""
+    os.environ["GEMINI_API_KEY"] = "g"
+    bodies = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):  # noqa: A002
+        bodies.append(__import__("copy").deepcopy(json))
+        if "thinkingConfig" in json["generationConfig"] and "old" in url:
+            return R({"error": {"message": "Thinking level is not supported for this model."}}, 400)
+        return R({"candidates": [{"content": {"parts": [{"text": __import__("json").dumps(ANSWER)}]}}]})
+
+    A.requests.post = fake_post
+    A.GeminiAnalyst("gemini-4-hydrogen", thinking="low").decide(CTX)
+    assert bodies[-1]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+    A.GeminiAnalyst("gemini-4-hydrogen").decide(CTX)                    # 기본값 → 보내지 않음
+    assert "thinkingConfig" not in bodies[-1]["generationConfig"]
+    A.GeminiAnalyst("gemini-4-hydrogen", thinking="max!").decide(CTX)   # 이상한 값 → 무시
+    assert "thinkingConfig" not in bodies[-1]["generationConfig"]
+    bodies.clear()
+    g = A.GeminiAnalyst("gemini-old", thinking="medium")
+    r = g.decide(CTX)
+    assert len(bodies) == 2 and "thinkingConfig" not in bodies[1]["generationConfig"] and r["decisions"]
+    g.decide(CTX)                                                        # 다음부터는 바로 기본값
+    assert len(bodies) == 3
+
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(ai_provider="gemini", ai_models={"gemini": "gemini-4-hydrogen"}, ai_max_tokens=4000,
+                          gemini_thinking="medium", ai_backup="off")
+    assert A.make_analyst(cfg).thinking == "medium"
+
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

@@ -218,16 +218,21 @@ class ClaudeAnalyst:
         return normalize(raw, self.label)
 
 
+GEMINI_THINKING = ("low", "medium", "high")
+
+
 class GeminiAnalyst:
     """Gemini REST (generateContent, JSON 모드). 키: GEMINI_API_KEY"""
     name = "gemini"
     URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def __init__(self, model: str, max_tokens: int = 4000):
+    def __init__(self, model: str, max_tokens: int = 4000, thinking: str = ""):
         self.key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
         if not self.key:
             raise RuntimeError(".env 에 GEMINI_API_KEY 가 없습니다")
         self.model, self.max_tokens = model, max_tokens
+        # 생각 수준 (Gemini 3 이후: low/medium/high). "" = 모델 기본값 (4 Hydrogen 은 high)
+        self.thinking = thinking if thinking in GEMINI_THINKING else ""
         self.label = f"Gemini({model})"
 
     def decide(self, ctx: dict) -> dict:
@@ -237,9 +242,19 @@ class GeminiAnalyst:
             "generationConfig": {"responseMimeType": "application/json",
                                  "maxOutputTokens": max(self.max_tokens, 8000)},
         }
+        if self.thinking:
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self.thinking}
         r = post_with_retry(self.URL.format(model=self.model), json=body, timeout=AI_TIMEOUT,
                           headers={"x-goog-api-key": self.key, "Content-Type": "application/json"})
         data = r.json() if r.content else {}
+        if r.status_code == 400 and self.thinking and "thinking" in r.text.lower():
+            # 생각 수준을 지원하지 않는 모델(예: 2.x) — 기본값으로 다시 한 번
+            log.warning("Gemini %s: 생각 수준(%s) 미지원 → 기본값으로 재시도", self.model, self.thinking)
+            body["generationConfig"].pop("thinkingConfig", None)
+            self.thinking = ""
+            r = post_with_retry(self.URL.format(model=self.model), json=body, timeout=AI_TIMEOUT,
+                                headers={"x-goog-api-key": self.key, "Content-Type": "application/json"})
+            data = r.json() if r.content else {}
         if r.status_code != 200:
             raise RuntimeError(f"Gemini 오류 {r.status_code}: {(data.get('error') or {}).get('message', r.text[:200])}")
         cands = data.get("candidates") or []
@@ -473,6 +488,13 @@ def available(provider: str) -> bool:
 BACKUP_DEFAULT = "claude-haiku-5-5"
 
 
+def _new(prov: str, model: str, cfg):
+    """AI 하나 만들기 — Gemini 에는 생각 수준 설정을 넘긴다."""
+    if prov == "gemini":
+        return GeminiAnalyst(model, cfg.ai_max_tokens, getattr(cfg, "gemini_thinking", ""))
+    return _CLASSES[prov](model, cfg.ai_max_tokens)
+
+
 def _backup(cfg):
     """다수결 예비 AI. auto = Claude 키가 있으면 Claude 저렴 모델(이미 그 모델을 쓰고 있으면 Sonnet).
     "off" = 없음, "claude:모델명" 처럼 직접 지정 가능."""
@@ -488,7 +510,7 @@ def _backup(cfg):
     prov = prov.strip().lower()
     if prov not in _CLASSES or not available(prov):
         return None
-    return _CLASSES[prov](model.strip() or cfg.ai_models.get(prov), cfg.ai_max_tokens)
+    return _new(prov, model.strip() or cfg.ai_models.get(prov), cfg)
 
 
 def make_analyst(cfg):
@@ -497,10 +519,10 @@ def make_analyst(cfg):
         from .signals import RulesAnalyst
         return RulesAnalyst()
     if prov == "consensus":
-        members = [_CLASSES[p](cfg.ai_models[p], cfg.ai_max_tokens) for p in PROVIDERS if available(p)]
+        members = [_new(p, cfg.ai_models[p], cfg) for p in PROVIDERS if available(p)]
         return ConsensusAnalyst(members, _backup(cfg))
     if prov not in _CLASSES:
         raise RuntimeError(f"알 수 없는 AI: {prov} (claude/gemini/openai/consensus/rules)")
     if not available(prov):
         raise RuntimeError(f".env 에 {PROVIDERS[prov]['env']} 가 없습니다 ({PROVIDERS[prov]['label']} 사용 시 필요)")
-    return _CLASSES[prov](cfg.ai_models[prov], cfg.ai_max_tokens)
+    return _new(prov, cfg.ai_models[prov], cfg)

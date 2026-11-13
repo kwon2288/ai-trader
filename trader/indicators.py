@@ -37,6 +37,14 @@ def _vol(closes: list[float], n: int = 20) -> float | None:
     return math.sqrt(sum((r - m) ** 2 for r in rets) / len(rets)) * 100
 
 
+def _atr_pct(highs, lows, closes, n: int = 14) -> float | None:
+    """ATR(14) — 평균 진폭(전일 종가 갭 포함)을 오늘 종가 대비 % 로."""
+    if len(closes) < n + 1 or not closes[-1]:
+        return None
+    trs = [max(h, pc) - min(lo, pc) for h, lo, pc in zip(highs[-n:], lows[-n:], closes[-n - 1:-1])]
+    return sum(trs) / n / closes[-1] * 100
+
+
 def compute(daily: list[dict]) -> dict:
     closes = [float(r["close"]) for r in daily]
     vols = [float(r["volume"]) for r in daily]
@@ -67,6 +75,7 @@ def compute(daily: list[dict]) -> dict:
         "ret_20d_pct": r(_ret(closes, 20)),
         "ret_60d_pct": r(_ret(closes, 60)),
         "volatility_20d_pct": r(_vol(closes)),
+        "atr14_pct": r(_atr_pct(highs, lows, closes)),
         "volume_vs_20d_avg": r(vols[-1] / vol20) if vol20 else None,
         "days": len(closes),
     }

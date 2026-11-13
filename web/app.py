@@ -186,6 +186,11 @@ def _monitor_loop():
                     close_summary(c, mk)                  # 장 마감 10분 뒤 하루 요약 (하루 한 번)
                 except Exception as e:  # noqa: BLE001
                     app.logger.warning("마감 요약 오류(%s): %s", mk, e)
+            try:
+                from trader.runner import weekly_summary
+                weekly_summary(c)                         # 그 주 마지막 마감 뒤 주간 리포트 (주 1회)
+            except Exception as e:  # noqa: BLE001
+                app.logger.warning("주간 리포트 오류: %s", e)
             from trader import backup
             if datetime.now(KST).hour >= 18:           # 장 끝난 뒤 오늘 백업이 아직 없으면
                 backup.daily(j, c.data_dir, raw, warn=lambda m: notify.send(c, "errors", m))

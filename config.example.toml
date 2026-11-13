@@ -39,6 +39,7 @@ hybrid = true
 news = false        # AI 에 최근 뉴스 제목·공시(DART)도 함께 보내기 — 웹 설정 → AI 에서 켜고 끔
 claude_model = "claude-sonnet-5-5"   # 저렴: claude-haiku-5-5
 gemini_model = "gemini-3.8-flash"    # 저렴: gemini-3.5-flash-lite · 신형: gemini-4-hydrogen
+gemini_thinking = ""                 # Gemini 생각 수준: low / medium / high ("" = 모델 기본값, 4 Hydrogen 은 high)
 openai_model = "gpt-6.1-sol"         # 저렴: gpt-6-luna
 max_tokens = 4000
 # 다수결에서 한 AI 가 실패(혼잡 503 등)하면 대신 물어볼 예비 AI — 추가 결제 없이 Claude 키로
@@ -113,6 +114,7 @@ orders = true      # 주문 실행·실패
 errors = true      # 실행 오류 (AI·증권사 연결 등)
 halt = true        # 최대 손실 한도로 정지
 daily = false      # 하루 마감 요약 (그날 마지막 실행 후)
+weekly = true      # 주간 리포트 (그 주 마지막 마감 뒤)
 
 [schedule]
 # 자동 실행 시각 (평일). 웹 설정 → 자동 실행 시각에서 바꾸면 타이머에 바로 적용돼요.
@@ -148,6 +150,8 @@ guard = true            # 보호 규칙 (시장별로도 가능): 추격 매수 
 chase_max_ret5 = 12     #   최근 5일 상승률이 이 % 를 넘은 종목은 신호가 나도 안 삼 (0 = 끔)
 protect_at_pct = 5      #   수익이 한 번 이 % 를 넘으면 손절선을 본전으로 (0 = 끔)
 trail_pct = 5           #   그 뒤 고점 대비 이 % 내려오면 정리 (0 = 본전만 지킴)
+reentry_days = 5        #   손실로 판 종목은 이 거래일 동안 다시 사지 않음 (0 = 끔)
+stop_atr = 0            # 손절을 ‘평소 하루 변동폭(ATR14) × 배수’로 (예: 2, 2~15% 사이, 0 = 고정 % 손절 · 시장별로도 가능)
 late_buy = true         # 신고가 돌파 매수는 그날 마지막 정기 실행에서만 — 장중 가짜 돌파 방지 (시장별로도 가능)
 # 시장별로 따로 쓰려면 아래처럼 (없는 값은 위 [strategy]·[risk] 공통 값). 웹 설정 → 전략에서 저장하면 자동으로 생겨요.
 # [strategy.kr]

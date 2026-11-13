@@ -44,6 +44,18 @@
       <div class="mute">이게 플러스여야 AI 를 쓰는 의미가 있어요</div></div>
   </div>
   {% if chart %}{{ chart|safe }}<div class="mute">{{ '월별' if monthly else '일별' }} 실현 손익</div>{% endif %}
+  {% if cmps %}
+  <h2 style="margin-top:16px">시장과 비교</h2>
+  <div class="stats">
+    {% for x in cmps %}
+    <div class="stat"><div class="k">{{ x.flag }} 봇 (예산 대비)</div><div class="v">{{ pct(x.bot_pct) }}</div>
+      <div class="mute">{{ x.bench_name }} {% if x.bench_pct is not none %}{{ "%+.2f"|format(x.bench_pct) }}% →
+        {{ '봇이 ' ~ ('%.2f'|format((x.bot_pct - x.bench_pct)|abs)) ~ '%p ' ~ ('앞섬 ✅' if x.bot_pct > x.bench_pct else '뒤처짐') }}
+        {% elif x.bench_err %}조회 실패{% else %}데이터 없음{% endif %}</div></div>
+    {% endfor %}
+  </div>
+  <div class="mute">실현 + 평가 손익 변화를 그 시장 예산으로 나눈 값이에요. 지수는 같은 기간 등락률.</div>
+  {% endif %}
   {% if cmp %}
   <h2 style="margin-top:16px">시장과 비교</h2>
   <div class="stats">

@@ -75,7 +75,7 @@ def test_short_sweep():
     assert sw["kind"] == "short" and len(sw["rows"]) == 8                           # 신호 4 × 최대 보유 2
     assert {x["signal"] for x in sw["rows"]} == set(signals.MODES)
     assert len(sw["best_by_signal"]) == 4 and all(x["core_pct"] == 0 for x in sw["rows"])
-    assert backtest.grid_size(backtest.SHORT_GRID) == 576      # 보호 규칙 끔/켬 포함
+    assert backtest.grid_size(backtest.SHORT_GRID) == 768      # 보호 규칙 끔/켬 · ATR 손절 포함
 
 
 def test_bot_max_hold_exit_and_rules_mode():

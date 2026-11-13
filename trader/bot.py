@@ -279,13 +279,66 @@ class Bot:
     # ── 손절·익절 (정기 실행과 장중 감시가 함께 씀) ─────────
     def _exit_trigger(self, h, code: str | None = None, track: bool = True) -> str | None:
         pnl = round(h.pnl_pct, 6)              # 부동소수 오차(14.9999…%) 방지
-        if pnl <= self.cfg.stop_loss_pct:
+        if pnl <= self._stop_for(code):
             return "손절"
         if pnl >= self.cfg.take_profit_pct:
             return "익절"
         if code and self._protect_hit(code, h, track):
             return "이익 보호"
         return None
+
+    def _stop_for(self, code: str | None) -> float:
+        """이 종목의 손절선(%). ATR 손절을 켰고 살 때(또는 첫 정기 실행 때) 정해 둔 값이 있으면 그것, 아니면 고정 %."""
+        from . import strategy
+        if code and strategy.settings(self.cfg)["stop_atr"]:
+            opened = self.j.bot_codes(self.cfg.market).get(code) or ""
+            saved = (self.j.get(f"stop_{self.cfg.ledger}_{code}") or "").split("|")
+            if len(saved) == 2 and saved[0] == opened:
+                try:
+                    return float(saved[1])
+                except ValueError:
+                    pass
+        return float(self.cfg.stop_loss_pct)
+
+    def _set_atr_stops(self, candidates: list[dict], codes, k: float) -> None:
+        """ATR 손절선을 정해 둔다 (방금 산 종목 · 아직 값이 없는 보유 종목). 한 번 정하면 팔 때까지 그대로."""
+        from . import strategy
+        if not k:
+            return
+        atr = {c["code"]: c.get("atr14_pct") for c in candidates}
+        opened_map = self.j.bot_codes(self.cfg.market)
+        for code in codes:
+            key = f"stop_{self.cfg.ledger}_{code}"
+            opened = opened_map.get(code) or now().date().isoformat()     # 방금 주문(체결 전)이면 오늘 연 것으로
+            saved = (self.j.get(key) or "").split("|")
+            if len(saved) == 2 and saved[0] == opened:
+                continue
+            if atr.get(code) is None:
+                continue
+            pct = strategy.stop_pct(self.cfg.stop_loss_pct, k, atr[code])
+            self.j.set(key, f"{opened}|{pct}")
+            self.say(f"📐 {code} ATR 손절선 {pct:+.1f}% (ATR {float(atr[code]):.1f}% × {k:g})")
+
+    def _cooldown(self, days: int) -> dict[str, str]:
+        """손실로 판 지 days 거래일이 안 된 종목 → 사유. 재매수 대기 (보호 규칙)."""
+        if not days:
+            return {}
+        from . import ledger, strategy
+        today = now().date().isoformat()
+        last: dict[str, dict] = {}
+        try:
+            for t in ledger.trades(self.j, self.cfg.ledger, ledger.costs_of(self.cfg)):
+                last[t["code"]] = t                      # 오래된 → 최신 순이라 마지막이 최근 매도
+        except Exception as e:  # noqa: BLE001
+            log.warning("재매수 대기 확인 실패: %s", e)
+            return {}
+        out = {}
+        for code, t in last.items():
+            if t["pnl"] < 0:
+                n = strategy.busdays_between(t["date"], today)
+                if n < days:
+                    out[code] = f"{t['date'][5:]} 손실 매도 → {days - n}거래일 더"
+        return out
 
     def _protect_hit(self, code: str, h, track: bool = True) -> bool:
         """이익 보호: 보유 중 고점을 기록해 두고, 수익이 protect_at % 를 넘은 적이 있으면
@@ -582,6 +635,11 @@ class Bot:
 
         # 2-4) 신고가 돌파: 장중 가격으로는 가짜 돌파가 많다 → 매수는 그날 마지막 정기 실행에서만
         gopts = strategy.guard_opts(sg)
+        cooled = self._cooldown((gopts or {}).get("reentry_days") or 0)
+        for c in candidates:
+            if not c["held"] and c["code"] in cooled:
+                c["cooldown"] = cooled[c["code"]]
+        self._set_atr_stops(candidates, list(held), sg["stop_atr"])     # 예전에 산 종목도 ATR 손절선을 정해 둠
         if sg["signal"] == "breakout":
             if sg["late_buy"] and not self.no_buy_reason and not force:      # 직접 누른 강제 실행은 예외
                 last = last_slot_wait(cfg)
@@ -616,7 +674,7 @@ class Bot:
             skipped: list = []
             sig = signals.evaluate(candidates, can_buy=can_buy, mode=sg["signal"], opts=gopts, skipped=skipped)
             if skipped:
-                self.say("🚫 추격 매수 차단 — 이미 많이 오른 신호는 건너뜀: "
+                self.say("🚫 매수 신호 건너뜀 (추격 매수 차단·재매수 대기): "
                          + ", ".join(f"{c['name']}({why})" for c, why in skipped))
             if sg["rule_sell"] == "direct":
                 n_sold = self._direct_rule_sells(sig, held, quotes, run_id, analyze_only)
@@ -657,6 +715,7 @@ class Bot:
                 "max_per_position": cfg.max_per_position_krw,
                 "max_positions": cfg.max_positions,
                 "auto_stop_loss_pct": cfg.stop_loss_pct,
+                "auto_stop_loss_atr_mult": sg["stop_atr"] or None,   # 있으면 손절은 ATR14 × 배수 (2~15%)
                 "auto_take_profit_pct": cfg.take_profit_pct,
                 "min_hold_days": cfg.min_hold_days,
                 "max_hold_days": sg["max_hold_days"],
@@ -769,6 +828,8 @@ class Bot:
                 note(d, "무시 (사용자가 직접 보유한 종목 — 섞이지 않게 매수 안 함)"); continue
             if self.no_buy_reason:
                 note(d, f"보류 ({self.no_buy_reason})"); continue
+            if c in cooled:
+                note(d, f"보류 (재매수 대기 — {cooled[c]})"); continue
             if core_code and c == core_code:
                 note(d, "무시 (코어 ETF — 따로 적립)"); continue
             if q.warnings:
@@ -792,6 +853,7 @@ class Bot:
             note(d, "매수 실행" if ok else "매수 실패")
             if ok:
                 self.j.set(f"bo_level_{cfg.ledger}_{c}", str(levels.get(c) or ""))     # 돌파선 (돌파 실패 판단용)
+                self._set_atr_stops(candidates, [c], sg["stop_atr"])
                 cash -= qty * est
                 held[c] = None  # 보유 종목 수 카운트용
 

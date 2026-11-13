@@ -62,6 +62,12 @@
       <input name="{{ key }}_custom" class="model-custom" placeholder="모델 ID 입력 (예: {{ known[0] }})"
              style="display:none;margin-top:6px" autocomplete="off"></div>
   {% endfor %}
+    <div><label for="gemini_thinking">Gemini 생각 수준</label>
+      <select id="gemini_thinking" name="gemini_thinking">
+      {% for v, d in [('', '모델 기본값'), ('low', '낮음 · 빠르고 저렴 (추천)'), ('medium', '보통'), ('high', '높음 · 느리고 토큰 많음')] %}
+        <option value="{{ v }}" {{ 'selected' if (c.gemini_thinking or '') == v }}>{{ d }}</option>{% endfor %}
+      </select>
+      <div class="mute" style="margin-top:4px">생각 토큰도 출력 요금이에요. 4 Hydrogen 기본값은 ‘높음’. 지원하지 않는 모델이면 자동으로 기본값을 써요.</div></div>
     <div><label for="order_type">주문 방식</label>
       <select id="order_type" name="order_type">
       {% for k, v in order_types.items() %}<option value="{{ k }}" {{ 'selected' if raw.order.type == k }}>{{ v }}</option>{% endfor %}
@@ -143,6 +149,9 @@
       <div><label for="{{ mk }}_max_hold_days">최대 보유일 (지나면 정리, 0 = 제한 없음)</label>
         <input id="{{ mk }}_max_hold_days" name="{{ mk }}_max_hold_days" value="{{ v.max_hold_days }}" inputmode="numeric"></div>
       <div><label for="{{ mk }}_stop">손절 (%)</label><input id="{{ mk }}_stop" name="{{ mk }}_stop" value="{{ '%g'|format(v.stop) }}" inputmode="decimal"></div>
+      <div><label for="{{ mk }}_stop_atr">ATR 손절 배수 (0 = 위의 고정 % 손절)</label>
+        <input id="{{ mk }}_stop_atr" name="{{ mk }}_stop_atr" value="{{ '%g'|format(v.stop_atr) }}" inputmode="decimal">
+        <div class="mute" style="font-size:12px;margin-top:3px">예) 2 → 평소 하루 변동폭(ATR14)의 2배, 2~15% 사이. 살 때 정해져요.</div></div>
       <div><label for="{{ mk }}_take">익절 (%)</label><input id="{{ mk }}_take" name="{{ mk }}_take" value="{{ '%g'|format(v.take) }}" inputmode="decimal"></div>
       <div><label for="{{ mk }}_min_hold">최소 보유일 (이 전엔 규칙·AI 매도 안 함, 손절은 예외)</label>
         <input id="{{ mk }}_min_hold" name="{{ mk }}_min_hold" value="{{ v.min_hold }}" inputmode="numeric"></div>
@@ -155,7 +164,7 @@
         <input id="core_{{ mk }}" name="core_{{ mk }}" value="{{ v.core_code }}"></div>
       <div><label style="display:flex;gap:8px;align-items:center;color:var(--fg)">
         <input type="checkbox" name="{{ mk }}_guard" style="width:auto" {{ 'checked' if v.guard }}>
-        보호 규칙 (추격 매수 차단 · 돌파 실패 정리 · 이익 보호)</label></div>
+        보호 규칙 (추격 매수 차단 · 돌파 실패 정리 · 이익 보호 · 재매수 대기)</label></div>
       <div><label style="display:flex;gap:8px;align-items:center;color:var(--fg)">
         <input type="checkbox" name="{{ mk }}_late_buy" style="width:auto" {{ 'checked' if v.late_buy }}>
         돌파 매수는 그날 마지막 실행에서만</label></div>
@@ -175,6 +184,8 @@
         <input id="protect_at_pct" name="protect_at_pct" value="{{ '%g'|format(strat_m.kr.protect_at_pct) }}" inputmode="decimal"></div>
       <div><label for="trail_pct">그 뒤 고점 대비 이 % 내려오면 정리 (0 = 본전만 지킴)</label>
         <input id="trail_pct" name="trail_pct" value="{{ '%g'|format(strat_m.kr.trail_pct) }}" inputmode="decimal"></div>
+      <div><label for="reentry_days">재매수 대기 — 손실로 판 종목은 이 거래일 동안 다시 안 삼 (0 = 끔)</label>
+        <input id="reentry_days" name="reentry_days" value="{{ '%g'|format(strat_m.kr.reentry_days) }}" inputmode="numeric"></div>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn">전략 저장</button>
       <a class="btn" href="{{ url_for('backtest_page') }}">🔍 백테스트로 비교해 보기</a></div>
@@ -183,12 +194,14 @@
     위험 관리의 손절·익절·최소 보유일은 여기 값이 없을 때 쓰는 기본값이에요.<br>
     <b>보호 규칙</b>: ① 이미 급하게 오른 종목(최근 5일 상승률 초과)은 신호가 나도 사지 않음 ② 신고가 돌파로 산 종목이
     돌파선 아래로 1% 넘게 되돌아오면 최소 보유일과 상관없이 바로 정리 ③ 수익이 기준을 넘은 뒤에는 본전(또는 고점 대비 N%) 아래로
-    내려오면 정리. 효과는 백테스트 ‘자동 비교’에서 켠 것/끈 것을 나란히 볼 수 있어요.
+    내려오면 정리 ④ 손실로 판 종목은 며칠 동안 다시 사지 않음(떨어지는 종목 반복 매수 방지). 효과는 백테스트 ‘자동 비교’에서 켠 것/끈 것을 나란히 볼 수 있어요.
     <b>돌파 매수는 마지막 실행에서만</b>: 장중 가격으로 본 돌파는 마감 때 되밀리는 일이 많아, 그날 마지막 정기 실행
     (예: 14:30)에서만 사요 — 실행 시각을 15:10 처럼 마감에 가깝게 잡을수록 정확해요.<br>
     <b>코어-위성</b>: 예산 중 코어 비중만큼은 지수 ETF 를 사서 계속 들고 있고(매매·손절 안 함),
     나머지만 봇이 사고팔아요. 예) 예산 20만원 · 코어 70% → 14만원은 KODEX 200 보유, 6만원으로 봇 매매.
-    직접 갖고 있는 종목은 코어로 고를 수 없어요(섞이지 않게).</div>
+    직접 갖고 있는 종목은 코어로 고를 수 없어요(섞이지 않게).<br>
+    <b>ATR 손절</b>: 고정 % 대신 종목마다 평소 흔들림에 맞춘 손절 — 잔잔한 종목은 좁게, 많이 흔들리는 종목은 넓게.
+    이미 갖고 있는 종목은 다음 정기 실행 때 그날 ATR 로 정해져요.</div>
 </div>
 
 <div class="card sec" id="mode" data-sum="{{ {'dry':'드라이런','mock':'모의투자','live':'🔴 실계좌'}[c.mode] }}">
@@ -279,6 +292,7 @@
     <div class="row" style="margin-top:8px;gap:6px">
       <button class="btn">알림 종류 저장</button>
       <button class="btn" formaction="{{ url_for('notify_test') }}">🔔 테스트 보내기</button>
+      <button class="btn" formaction="{{ url_for('notify_weekly') }}">🗓 주간 리포트 지금 보내기</button>
     </div>
   </form>
   <details style="margin-top:12px"><summary><b>텔레그램 연결 방법</b></summary>

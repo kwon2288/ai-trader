@@ -12,10 +12,12 @@ config [strategy]
   chase_max_ret5 = 12     #   최근 5일 상승률이 이 % 를 넘은 종목은 새로 사지 않음 (0 = 끔)
   protect_at_pct = 5      #   수익이 한 번 이 % 를 넘으면 손절선을 본전으로 올림 (0 = 끔)
   trail_pct = 5           #   그 뒤로는 고점 대비 이 % 내려오면 정리 (0 = 본전만 지킴)
+  reentry_days = 5        #   손실로 판 종목은 이 거래일 동안 다시 사지 않음 (0 = 끔)
   late_buy = true         # 신고가 돌파 매수는 그날 마지막 정기 실행에서만 (장중 가짜 돌파 방지, 시장별)
+  stop_atr = 0            # 손절을 ‘평소 하루 변동폭(ATR14) × 이 배수’로 (0 = 고정 % 손절, 시장별). 2~15% 사이로 제한
 
 config [strategy.kr] / [strategy.us] — 시장별로 따로 (없으면 위 [strategy] 값)
-  signal · max_hold_days · market_filter · stop_loss_pct · take_profit_pct · min_hold_days
+  signal · max_hold_days · market_filter · stop_loss_pct · take_profit_pct · min_hold_days · guard · late_buy · stop_atr
 """
 from __future__ import annotations
 
@@ -25,8 +27,9 @@ MA_LONG = 200
 
 
 MARKET_KEYS = ("signal", "max_hold_days", "market_filter", "stop_loss_pct", "take_profit_pct", "min_hold_days",
-               "guard", "late_buy")
-GUARD_DEFAULT = {"chase_max_ret5": 12.0, "protect_at_pct": 5.0, "trail_pct": 5.0}
+               "guard", "late_buy", "stop_atr")
+GUARD_DEFAULT = {"chase_max_ret5": 12.0, "protect_at_pct": 5.0, "trail_pct": 5.0, "reentry_days": 5.0}
+ATR_STOP_MIN, ATR_STOP_MAX = 2.0, 15.0     # ATR 손절 폭의 하한·상한 (%)
 FAIL_EXIT_BUFFER_PCT = 1.0      # 돌파선보다 이만큼 더 내려와야 '돌파 실패' (잡음 방지)
 BREAKEVEN_PAD_PCT = 0.5         # 본전 = 평단 + 수수료·세금 몫
 
@@ -59,7 +62,11 @@ def settings(cfg) -> dict:
             nums[k] = max(0.0, min(100.0, float(s.get(k, d))))
         except (TypeError, ValueError):
             nums[k] = d
-    return {"market_filter": bool(s.get("market_filter", False)), "core_pct": core,
+    try:
+        stop_atr = max(0.0, min(10.0, float(s.get("stop_atr", 0) or 0)))
+    except (TypeError, ValueError):
+        stop_atr = 0.0
+    return {"market_filter": bool(s.get("market_filter", False)), "core_pct": core, "stop_atr": stop_atr,
             "guard": bool(s.get("guard", True)), "late_buy": bool(s.get("late_buy", True)), **nums,
             "signal": sig if sig in MODES else "trend", "max_hold_days": max_hold,
             "rule_sell": rule_sell if rule_sell in ("direct", "ai") else "direct",
@@ -94,7 +101,30 @@ def guard_opts(sg: dict, on: bool | None = None) -> dict | None:
         return None
     return {"chase_max_ret5": sg.get("chase_max_ret5", GUARD_DEFAULT["chase_max_ret5"]), "fail_exit": True,
             "protect_at": sg.get("protect_at_pct", GUARD_DEFAULT["protect_at_pct"]),
-            "trail": sg.get("trail_pct", GUARD_DEFAULT["trail_pct"])}
+            "trail": sg.get("trail_pct", GUARD_DEFAULT["trail_pct"]),
+            "reentry_days": int(sg.get("reentry_days", GUARD_DEFAULT["reentry_days"]) or 0)}
+
+
+def stop_pct(fixed: float, k: float, atr_pct) -> float:
+    """손절선(%, 음수). ATR 배수 k 가 있고 ATR 을 알면 −(k × ATR%) 를 2~15% 사이로, 아니면 고정 %."""
+    try:
+        a = float(atr_pct) if atr_pct is not None else 0.0
+    except (TypeError, ValueError):
+        a = 0.0
+    if not k or a <= 0:
+        return float(fixed)
+    return -round(min(ATR_STOP_MAX, max(ATR_STOP_MIN, k * a)), 2)
+
+
+def busdays_between(a: str, b: str) -> int:
+    """a 다음 날부터 b 까지의 평일 수 (YYYY-MM-DD). 공휴일은 모름 — 재매수 대기 계산용."""
+    from datetime import date, timedelta
+    d0, d1 = date.fromisoformat(a[:10]), date.fromisoformat(b[:10])
+    n, d = 0, d0
+    while d < d1:
+        d += timedelta(days=1)
+        n += d.weekday() < 5
+    return n
 
 
 def protect_floor(avg: float, peak: float, opts: dict | None) -> float | None:

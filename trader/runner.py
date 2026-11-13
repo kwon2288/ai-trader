@@ -109,8 +109,14 @@ def run_cycle(cfg: Config, analyze_only: bool = False, force: bool = False, sour
                 if j.get("ai_limit_notified") != ms["month"]:
                     j.set("ai_limit_notified", ms["month"])
                     _nt.send(cfg, "errors", note)
-            bot = Bot(cfg, make_broker(cfg), analyst, j)
+            broker = make_broker(cfg)
+            bot = Bot(cfg, broker, analyst, j)
             out = bot.run(force=force, analyze_only=analyze_only)
+            try:                                        # 지수 종가 (손익 화면·주간 리포트의 지수 비교용, 하루 한 번)
+                from . import bench
+                bench.refresh(cfg, broker, j)
+            except Exception as e:  # noqa: BLE001
+                log.warning("지수 비교 데이터 갱신 실패: %s", e)
             if note:
                 out = note + "\n" + out
         except Exception as e:  # noqa: BLE001
@@ -207,6 +213,11 @@ def close_summary(base: Config, market: str, at=None, force: bool = False) -> bo
         refresh_balance(base, market)                 # 마감 가격으로 다시 계산
     except Exception:  # noqa: BLE001
         pass
+    try:                                              # 지수도 마감 종가로
+        from . import bench
+        bench.refresh(cfg, make_broker(cfg), j, force=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("지수 비교 데이터 갱신 실패: %s", e)
     snap = j.snapshot(cfg.ledger) or {}
     today = ledger.period(j, cfg.ledger, now.date(), now.date(), ledger.costs_of(cfg))
     ai = pricing.ai_cost(j, cfg.data_dir, cfg.ledger, start.astimezone(KST))      # 그 시장 하루(미국은 뉴욕 0시부터)
@@ -258,6 +269,90 @@ def combined_summary(base: Config, day) -> str:
     ai = pricing.ai_cost(j, kr.data_dir, None, datetime(day.year, day.month, day.day, tzinfo=KST))
     if ai["calls"]:
         lines.append(f"AI: {ai['calls']}회 · ${ai['usd']:.3f} (≈ {ai['usd'] * fx:,.0f}원)")
+    return "\n".join(lines)
+
+
+def weekly_summary(base: Config, at=None, force: bool = False) -> bool:
+    """주간 리포트 — 그 주 마지막 장 마감 뒤 한 번 (미국을 쓰면 뉴욕 금요일 마감 뒤 = 토요일 아침, 아니면 국내 금요일 15:40).
+    금요일이 휴장이면 주말에 보낸다. 그 주에 자동 실행이 한 번도 없었으면 보내지 않는다."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from . import notify
+    from .bot import CLOSE
+    market = "us" if base.us_enabled else "kr"
+    cfg = market_cfg(base, market)
+    if not force and (not notify.enabled(cfg, "weekly") or not notify.channels(cfg.data_dir)):
+        return False
+    tzname, hh, mm = CLOSE[market]
+    now = (at or datetime.now(ZoneInfo(tzname))).astimezone(ZoneInfo(tzname))
+    wd = now.weekday()
+    if not force and not (wd >= 5 or (wd == 4 and (now.hour, now.minute) >= (hh, mm + 10))):
+        return False
+    monday = now.date() - timedelta(days=wd)
+    friday = monday + timedelta(days=4)
+    j = Journal(market_cfg(base, "kr").db_path)
+    key = "weekly_sent"
+    if not force and j.get(key) == monday.isoformat():
+        return False
+    if not force:                                    # 직접 보내 보기(force)는 정기 발송을 막지 않게
+        j.set(key, monday.isoformat())
+    from .journal import KST
+    since = datetime(monday.year, monday.month, monday.day, tzinfo=KST).isoformat(timespec="seconds")
+    ran = j.db.execute("SELECT 1 FROM run_logs WHERE kind='trade' AND ts >= ? LIMIT 1", (since,)).fetchone()
+    if not ran and not force:
+        return False
+    notify.send(cfg, "weekly", weekly_text(base, monday, friday), force=force)
+    return True
+
+
+def weekly_text(base: Config, monday, friday) -> str:
+    """주간 리포트 본문 (국내 + 미국이면 미국도). 미국 실현 손익은 거래 당시 환율로 원화도 함께."""
+    from . import bench, ledger, pricing
+    mkts = ["kr"] + (["us"] if base.us_enabled else [])
+    j0 = Journal(market_cfg(base, "kr").db_path)
+    try:
+        fx = float(j0.get("fx_usdkrw") or 0) or 1400.0
+    except ValueError:
+        fx = 1400.0
+    won = lambda v: f"{v:+,.0f}원"                                     # noqa: E731
+    lines = [f"🗓 주간 리포트 ({monday:%m/%d}~{friday:%m/%d})"]
+    total_krw = 0.0
+    for mk in mkts:
+        c = market_cfg(base, mk)
+        j = Journal(c.db_path)
+        r = ledger.period(j, c.ledger, monday, friday, ledger.costs_of(c))
+        total_krw += r["pnl_krw"]
+        flag = "🇰🇷 국내" if mk == "kr" else "🇺🇸 미국"
+        lines.append("")
+        sg = lambda v: ("+" if v > 0 else "") + c.money(v)                         # noqa: E731
+        pnl = won(r["pnl"]) if mk == "kr" else f"{sg(r['pnl'])} ≈ {won(r['pnl_krw'])}"
+        lines.append(f"{flag} — 매수 {r['buys']}건 · 매도 {r['n']}건 · 실현 {pnl}")
+        if r["n"]:
+            ex = (f"최고 {r['best']['name']} {r['best']['pnl_pct']:+.1f}% · 최저 {r['worst']['name']} "
+                  f"{r['worst']['pnl_pct']:+.1f}%") if r["n"] > 1 else f"{r['best']['name']} {r['best']['pnl_pct']:+.1f}%"
+            lines.append(f"  승률 {r['win_rate']:.0f}% ({r['wins']}승 {r['n'] - r['wins']}패) · {ex}")
+        snap = j.snapshot(c.ledger) or {}
+        budget = float(snap.get("budget") or c.total_krw or 0)
+        cmp_ = bench.line(j, mk, monday, friday, bench.bot_change(j, c.ledger, budget, monday, friday),
+                          lambda v: ("+" if v > 0 else "") + c.money(v), budget)
+        if cmp_:
+            lines.append("  " + cmp_)
+        if c.ai_hybrid:
+            try:
+                from . import scorecard
+                sc = scorecard.summary(j, c.ledger)
+                t, b = sc["taken"], sc["blocked"]
+                if t["n"] or b["n"]:
+                    avg = lambda g: "-" if g["avg"] is None else f"{g['avg']:+.2f}%"      # noqa: E731
+                    lines.append(f"  AI 성적표(누적): 통과 {t['n']}건 평균 {avg(t)} · 막음 {b['n']}건 평균 {avg(b)}")
+                    lines.append(f"  → {sc['verdict']}")
+            except Exception as e:  # noqa: BLE001
+                log.warning("주간 리포트 성적표 실패: %s", e)
+    if len(mkts) > 1:
+        lines += ["", f"🌐 합계 실현 손익: {won(total_krw)}"]
+    ai = pricing.ai_cost(j0, market_cfg(base, "kr").data_dir, None, monday, friday)
+    if ai["calls"]:
+        lines.append(f"AI 비용: {ai['calls']}회 · ${ai['usd']:.3f} (≈ {ai['usd'] * fx:,.0f}원)")
     return "\n".join(lines)
 
 

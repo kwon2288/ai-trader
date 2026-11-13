@@ -158,3 +158,16 @@ def kakao_disconnect():
     notify.kakao_disconnect(webapp.cfg().data_dir)
     flash("카카오톡 알림 연결을 끊었습니다.", "ok")
     return redirect(url_for("settings") + "#notify")
+
+
+@app.post("/notify/weekly")
+@login_required
+def notify_weekly():
+    """주간 리포트를 지금 한 번 보내 보기 (이번 주 월~금 기준)."""
+    from trader.runner import weekly_summary
+    try:
+        weekly_summary(webapp.cfg(), force=True)
+        flash("이번 주 주간 리포트를 보냈어요. 텔레그램을 확인하세요.", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"주간 리포트 실패: {e}", "err")
+    return redirect(url_for("settings") + "#notify")

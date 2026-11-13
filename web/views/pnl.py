@@ -62,7 +62,7 @@ def bars_svg(items: list[tuple[str, float]]) -> str:
     return "".join(out)
 
 
-def _compare_bench(c, j, start, end) -> dict | None:
+def _compare_bench(c, j, start, end, chart: bool = True) -> dict | None:
     """같은 기간 봇 자산 변화(예산 대비) vs 지수 ETF 를 같은 금액으로 들고 있었을 때."""
     series = j.equity_series(c.ledger, 5000)
     if not series:
@@ -93,7 +93,7 @@ def _compare_bench(c, j, start, end) -> dict | None:
             out["bench_pct"] = round((b1 / b0 - 1) * 100, 2)
             bmap = {b["date"]: b["close"] for b in bars}
             ds = sorted(daily)
-            if len(ds) >= 2:
+            if len(ds) >= 2 and chart:
                 out["chart"] = lines_svg(
                     [[budget + daily[d] - e0 for d in ds],
                      [budget * bmap[d] / b0 if d in bmap else None for d in ds]],
@@ -166,7 +166,15 @@ def _pnl_all(base, p, f, t, start, end):
         snap["pnl_pct"] = snap["pnl"] / budget * 100 if budget else 0.0
     split = {"kr": r_kr["pnl"], "us": r_us["pnl"], "us_krw": r_us["pnl_krw"],
              "fx_gain": r_us["pnl_krw"] - round(r_us["pnl"] * fx)}
-    return render_template("pnl.html", c=kr, base=base, market="all", r=r, periods=PERIODS, p=p, cmp=None, ai=ai,
+    cmps = []                                    # 시장별로 같은 기간 지수와 비교 (국내 ↔ KODEX 200, 미국 ↔ SPY)
+    for mc, mj, flag in ((kr, j, "🇰🇷 국내"), (us, j_us, "🇺🇸 미국")):
+        try:
+            x = _compare_bench(mc, mj, start, end, chart=False)
+        except Exception:  # noqa: BLE001
+            x = None
+        if x:
+            cmps.append({**x, "flag": flag})
+    return render_template("pnl.html", c=kr, base=base, market="all", r=r, periods=PERIODS, p=p, cmp=None, cmps=cmps, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
                            snap=snap, split=split, fx=fx)
 

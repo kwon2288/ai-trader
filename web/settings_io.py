@@ -186,6 +186,9 @@ def validate_and_write(path: Path, form: dict) -> list[str]:
     text = _set(text, "ai", "provider", provider)
     text = _set(text, "ai", "hybrid", form.get("hybrid") == "on")
     text = _set(text, "ai", "news", form.get("news") == "on")
+    gt = (form.get("gemini_thinking") or "").strip().lower()
+    if gt in ("", "low", "medium", "high"):
+        text = _set(text, "ai", "gemini_thinking", gt)
     bk = (form.get("backup") or "auto").strip()
     if bk in ("auto", "off") or re.fullmatch(r"(claude|gemini|openai):[A-Za-z0-9._-]{1,60}", bk):
         text = _set(text, "ai", "backup", bk)

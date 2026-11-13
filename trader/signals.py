@@ -173,7 +173,8 @@ def evaluate(candidates: list[dict], can_buy: bool = True, mode: str = "trend", 
              skipped: list | None = None) -> dict[str, dict]:
     """종목코드 → 신호. 살 자리가 없으면(can_buy=False) 매수 신호는 세지 않는다.
     opts(보호 규칙 — strategy.guard_opts): chase_max_ret5 = 최근 5일 상승률 상한(추격 매수 차단),
-    fail_exit = 돌파 실패 조기 정리. skipped 를 주면 과열로 뺀 (후보, 사유)를 담아 준다."""
+    fail_exit = 돌파 실패 조기 정리. 후보에 cooldown(사유 문자열)이 있으면 매수 신호를 내지 않는다(재매수 대기).
+    skipped 를 주면 과열·대기로 뺀 (후보, 사유)를 담아 준다."""
     _, buy_fn, sell_fn = MODES.get(mode, MODES["trend"])
     opts = opts or {}
     cap = float(opts.get("chase_max_ret5") or 0)
@@ -186,6 +187,10 @@ def evaluate(candidates: list[dict], can_buy: bool = True, mode: str = "trend", 
             if s and cap and r5 is not None and r5 > cap:
                 if skipped is not None:
                     skipped.append((c, f"5일 {r5:+.1f}% > {cap:g}%"))
+                s = None
+            elif s and c.get("cooldown"):          # 손실로 판 지 얼마 안 된 종목 — 재매수 대기
+                if skipped is not None:
+                    skipped.append((c, f"재매수 대기: {c['cooldown']}"))
                 s = None
         if s:
             out[c["code"]] = s

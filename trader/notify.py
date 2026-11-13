@@ -3,7 +3,7 @@
 설정
   .env      TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
             KAKAO_REST_KEY (+ 선택 KAKAO_CLIENT_SECRET) — 연결은 웹 설정 → 알림 → ‘카카오톡 연결’
-  config    [notify] orders / errors / halt / daily  (true/false)
+  config    [notify] orders / errors / halt / daily / weekly  (true/false)
 
 알림 실패는 매매에 영향을 주지 않는다 (로그만 남김).
 """
@@ -20,8 +20,9 @@ import requests
 
 log = logging.getLogger("notify")
 KINDS = {"orders": "주문 실행·실패", "errors": "실행 오류 (AI·증권사 연결 등)",
-         "halt": "최대 손실 한도로 정지", "daily": "하루 마감 요약 (장 마감 10분 뒤 · 국내 15:40, 미국 뉴욕 16:10 · 미국 마감 뒤 국내+미국 통합 요약도)"}
-DEFAULTS = {"orders": True, "errors": True, "halt": True, "daily": False}
+         "halt": "최대 손실 한도로 정지", "daily": "하루 마감 요약 (장 마감 10분 뒤 · 국내 15:40, 미국 뉴욕 16:10 · 미국 마감 뒤 국내+미국 통합 요약도)",
+         "weekly": "주간 리포트 (금요일 장 마감 뒤 · 미국을 쓰면 토요일 아침) — 매매·승률·지수 비교·AI 성적표·AI 비용"}
+DEFAULTS = {"orders": True, "errors": True, "halt": True, "daily": False, "weekly": True}
 TIMEOUT = 10
 
 
