@@ -10,12 +10,20 @@
 
 <div class="card">
   <h2>AI 판단 기록</h2>
-  {% for r in runs %}
-  <details {{ 'open' if loop.first }} style="padding:6px 0;border-bottom:1px solid var(--line)">
-    <summary>{{ r.ts[5:16].replace('T',' ') }} — {{ r.market_view[:40] }}{{ '…' if r.market_view|length > 40 }}</summary>
-    <div style="padding-top:6px">{{ run_card(r) }}</div>
+  {% if runs %}
+  <div style="padding-bottom:6px">{{ run_card(runs[0]) }}</div>
+  {% if runs|length > 1 %}
+  <details class="acct" style="padding:8px 0 0;border-top:1px solid var(--line)">
+    <summary>이전 기록 {{ runs|length - 1 }}건 보기</summary>
+    {% for r in runs[1:] %}
+    <details style="padding:6px 0;border-bottom:1px solid var(--line)">
+      <summary>{{ r.ts[5:16].replace('T',' ') }} — {{ r.market_view[:40] }}{{ '…' if r.market_view|length > 40 }}</summary>
+      <div style="padding-top:6px">{{ run_card(r) }}</div>
+    </details>
+    {% endfor %}
   </details>
-  {% else %}<div class="mute">없음</div>{% endfor %}
+  {% endif %}
+  {% else %}<div class="mute">없음</div>{% endif %}
 </div>
 
 <div class="card sec" id="logs" data-sum="{% if logs %}최근 {{ logs|length }}건 · 마지막 {{ logs[0].ts[5:16].replace('T',' ') }}{% else %}없음{% endif %} — 눌러서 보기">
