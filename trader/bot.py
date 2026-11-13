@@ -97,6 +97,14 @@ def strategy_mode(cfg) -> str:
     return strategy.settings(cfg)["signal"]
 
 
+
+def _indent(text: str, first: str, rest: str | None = None) -> str:
+    """AI 여럿의 의견(여러 줄)을 로그·텔레그램에서 한 사람당 한 줄로 들여 쓴다."""
+    from .analyst import ai_lines
+    lines = [f"{w}: {b}" if w else b for w, b in ai_lines(text)] or [""]
+    rest = first if rest is None else rest
+    return "\n".join((first if i == 0 else rest) + ln for i, ln in enumerate(lines))
+
 class Bot:
     def __init__(self, cfg: Config, broker, analyst, journal: Journal | None = None):
         self.cfg, self.broker, self.analyst = cfg, broker, analyst
@@ -691,7 +699,7 @@ class Bot:
                 self.notify("errors", f"⚠ {self._mk()} AI 분석 실패 — 이번 회차는 매매하지 않았습니다\n{e}")
             return self._out()
         who = result.get("_provider") or getattr(self.analyst, "label", "AI")
-        self.say(f"🧠 {who} 시장판단: {result.get('market_view', '')}")
+        self.say(f"🧠 {who} 시장판단:\n" + _indent(result.get("market_view", ""), "  "))
         decisions = [d for d in result.get("decisions", []) if isinstance(d, dict)]
 
         # 6) 위험관리 필터 → 실행 (매도 먼저, 그다음 확신도 높은 매수)
@@ -703,7 +711,7 @@ class Bot:
             nm = names.get(d.get("code")) or self.j.names().get(d.get("code")) or d.get("code")
             self.j.add_decision(run_id, d, outcome, nm if nm != d.get("code") else None)
             self.say(f"  · {d.get('action')} {nm} (확신 {float(d.get('confidence', 0)):.2f}) → {outcome}\n"
-                     f"    └ {d.get('reason', '')}")
+                     + _indent(d.get("reason", ""), "    └ ", "      "))
 
         from .config import norm_symbol
         for d in decisions:

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import money, num, pct, run_card, order_table, log_item, market_tabs, sec_toolbar %}
+{% from "_macros.html" import money, num, pct, ai_text, run_card, order_table, log_item, market_tabs, sec_toolbar %}
 {% block body %}
 {{ market_tabs(base, market, 'index') }}
 
@@ -204,7 +204,7 @@
   <h2 class="sec-head">최근 AI 판단</h2>
   {% set judged = runs|selectattr('decisions')|list %}
   {% if runs and not runs[0].decisions %}
-  <div class="mute" style="margin-bottom:8px">마지막 실행 {{ runs[0].ts[5:16].replace('T',' ') }}: {{ runs[0].market_view }}</div>
+  <div class="mute" style="margin-bottom:8px">마지막 실행 {{ runs[0].ts[5:16].replace('T',' ') }}{{ ai_text(runs[0].market_view) }}</div>
   {% endif %}
   {% if judged %}{{ run_card(judged[0]) }}
   {% elif not runs %}<div class="mute">아직 없습니다.</div>

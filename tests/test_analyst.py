@@ -215,6 +215,27 @@ def test_claude_falls_back_when_forced_tool_unsupported():
     a.decide({"candidates": [], "portfolio": {}, "rules": {}})
     assert calls == ["tool", "auto", "auto"]                 # 다음부터는 바로 auto
 
+def test_votes_readable_one_line_per_ai():
+    """다수결 결과는 AI 마다 한 줄 — 의견이 갈려도 각자의 이유가 남는다. 옛 기록(‘ / ’ 로 이어 붙인 것)도 같이 나뉜다."""
+    mk = lambda who, act, why: {"_provider": f"{who}(m)", "market_view": f"{who} 시장", "decisions": [
+        {"code": "OXY", "action": act, "amount_krw": 100, "sell_ratio": 0, "confidence": 0.6, "reason": why}]}
+    out = A.merge_votes([mk("Claude", "HOLD", "추세 약함"), mk("Gemini", "HOLD", "역배열 / 거래량 부족"),
+                         mk("ChatGPT", "BUY", "과매도 반등")])
+    d = out["decisions"][0]
+    assert d["action"] == "HOLD"
+    assert A.ai_lines(d["reason"]) == [(None, "[의견 불일치 → 유지 · Claude 유지 · Gemini 유지 · ChatGPT 매수]"),
+                                       ("Claude(유지)", "추세 약함"), ("Gemini(유지)", "역배열 / 거래량 부족"),
+                                       ("ChatGPT(매수)", "과매도 반등")]
+    assert [w for w, _ in A.ai_lines(out["market_view"])] == ["Claude", "Gemini", "ChatGPT"]
+    old = "Claude: 관망. / Gemini: RSI 30 / 반등 시도. / ChatGPT: 소액 접근. (응답 실패: x)"
+    assert A.ai_lines(old) == [("Claude", "관망."), ("Gemini", "RSI 30 / 반등 시도."), ("ChatGPT", "소액 접근."),
+                               (None, "(응답 실패: x)")]
+    assert A.ai_lines("[의견 불일치 → 유지 · Claude:HOLD / Gemini:HOLD / ChatGPT:BUY]") == \
+        [(None, "[의견 불일치 → 유지 · Claude 유지 · Gemini 유지 · ChatGPT 매수]")]
+    assert A.ai_lines("[다수결 2/3 · Claude:BUY / Gemini:BUY / ChatGPT:HOLD] Claude: 좋음 | Gemini: 50/50") == \
+        [(None, "[다수결 2/3 · Claude 매수 · Gemini 매수 · ChatGPT 유지]"), ("Claude", "좋음"), ("Gemini", "50/50")]
+    assert A.ai_lines("단일 AI 이유") == [(None, "단일 AI 이유")] and A.ai_lines(None) == []
+
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

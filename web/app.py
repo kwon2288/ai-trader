@@ -38,6 +38,13 @@ if __name__ == "__main__":                       # python -m web.app — 기능�
     sys.modules.setdefault("web.app", sys.modules[__name__])
 
 
+@app.template_filter("ai_lines")
+def _ai_lines(text):
+    """AI 여럿의 의견을 한 사람당 한 줄로 (기록·현황 화면)."""
+    from trader.analyst import ai_lines
+    return ai_lines(text)
+
+
 @app.context_processor
 def _inject_version():
     from trader import __version__

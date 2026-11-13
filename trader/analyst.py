@@ -318,7 +318,9 @@ def merge_votes(results: list[dict]) -> dict:
     for code, votes in by_code.items():
         counts = Counter(d["action"] for _, d in votes)
         action, cnt = counts.most_common(1)[0]
-        tally = " / ".join(f"{p.split('(')[0]}:{d['action']}" for p, d in votes)
+        tally = " · ".join(f"{_short(p)} {ACT_KO.get(d['action'], d['action'])}" for p, d in votes)
+        # 첫 줄은 투표 결과, 그다음 AI 마다 한 줄씩 (반대 의견도 함께 — 왜 갈렸는지 보이게)
+        why = "\n".join(f"{_short(p)}({ACT_KO.get(d['action'], d['action'])}): {d['reason']}" for p, d in votes)
         if action in {"BUY", "SELL"} and cnt >= need:
             agree = [d for _, d in votes if d["action"] == action]
             merged.append({
@@ -326,24 +328,61 @@ def merge_votes(results: list[dict]) -> dict:
                 "amount_krw": min((d["amount_krw"] for d in agree if d["amount_krw"]), default=0),
                 "sell_ratio": min((d["sell_ratio"] for d in agree if d["sell_ratio"]), default=1.0),
                 "confidence": round(sum(d["confidence"] for d in agree) / len(agree), 2),
-                "reason": f"[다수결 {cnt}/{n} · {tally}] " + " | ".join(
-                    f"{p.split('(')[0]}: {d['reason']}" for p, d in votes if d["action"] == action),
+                "reason": f"[다수결 {cnt}/{n} · {tally}]\n{why}",
             })
         else:
             avg = [d["confidence"] for _, d in votes if d["action"] == "HOLD"] or [0.5]
+            head = f"[의견 불일치 → 유지 · {tally}]" if len(counts) > 1 else f"[{tally}]"
             merged.append({
                 "code": code, "action": "HOLD", "amount_krw": 0, "sell_ratio": 0,
                 "confidence": round(sum(avg) / len(avg), 2),
-                "reason": f"[의견 불일치 → 유지 · {tally}]" if len(counts) > 1 else
-                          f"[{tally}] " + " | ".join(f"{p.split('(')[0]}: {d['reason']}" for p, d in votes),
+                "reason": f"{head}\n{why}",
             })
     usage = {"in": sum((r.get("_usage") or {}).get("in", 0) for r in results),
              "out": sum((r.get("_usage") or {}).get("out", 0) for r in results)}
     return {
-        "market_view": " / ".join(f"{r['_provider'].split('(')[0]}: {r['market_view']}" for r in results),
-        "decisions": merged, "_provider": "다수결(" + ", ".join(r["_provider"].split("(")[0] for r in results) + ")",
+        "market_view": "\n".join(f"{_short(r['_provider'])}: {r['market_view']}" for r in results),
+        "decisions": merged, "_provider": "다수결(" + ", ".join(_short(r["_provider"]) for r in results) + ")",
         "_usage": usage,
     }
+
+
+ACT_KO = {"BUY": "매수", "SELL": "매도", "HOLD": "유지"}
+
+
+def _short(provider: str) -> str:
+    return provider.split("(")[0].strip()
+
+
+_AI_NAME = r"(?:예비 )?(?:Claude|Gemini|ChatGPT)"
+_OLD_SEP = re.compile(r"\s+[/|]\s+(?=" + _AI_NAME + r"[^:\n]{0,20}:\s)")
+_OLD_VOTE = re.compile(r"(" + _AI_NAME + r"):(BUY|SELL|HOLD)")
+_LABEL = re.compile(r"^(" + _AI_NAME + r"[^:\n]{0,20}):\s*(.*)$", re.S)
+
+
+def ai_lines(text: str | None) -> list[tuple[str | None, str]]:
+    """여러 AI 의견을 한 줄씩 나눈다 (화면·텔레그램 표시용). [(AI 이름 또는 None, 내용)]
+    v0.28.1 이전 기록(‘ / ’, ‘ | ’ 로 한 줄에 이어 붙인 형식)도 같은 모양으로 나눈다."""
+    t = (text or "").strip()
+    if not t:
+        return []
+    t = _OLD_VOTE.sub(lambda m: f"{m.group(1)} {ACT_KO[m.group(2)]}", t)
+    t = re.sub(r"(\][^\S\n]*(?:·[^\S\n]*)?)(?=" + _AI_NAME + r"[^:\n]{0,20}:\s)", "]\n", t)
+    if t.startswith("[") and "]" in t:                     # 옛 형식: [투표 결과] 뒤에 이유가 이어짐
+        i = t.index("]") + 1
+        if i < len(t) and t[i] == " ":
+            t = t[:i] + "\n" + t[i + 1:]
+    t = _OLD_SEP.sub("\n", t)
+    t = re.sub(r"(매수|매도|유지) / (?=" + _AI_NAME + ")", r"\1 · ", t)
+    t = re.sub(r"[^\S\n]+(\((?:응답 실패|응답 없음)[^)]*\))$", r"\n\1", t)
+    out = []
+    for line in t.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = _LABEL.match(line)
+        out.append((m.group(1), m.group(2)) if m else (None, line))
+    return out
 
 
 class ConsensusAnalyst:
@@ -418,7 +457,7 @@ class ConsensusAnalyst:
                     "decisions": decs, "_provider": f"다수결({who}만 응답)", "_usage": one.get("_usage")}
         out = merge_votes(results)
         if self.errors:
-            out["market_view"] += f" (응답 실패: {'; '.join(self.errors)})"
+            out["market_view"] += f"\n(응답 실패: {'; '.join(self.errors)})"
         return out
 
 
