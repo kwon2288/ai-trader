@@ -121,6 +121,7 @@ class Bot:
         self.sent = 0          # 이번 실행에서 보낸(체결 확인할) 주문 수
         self.no_buy_reason = None
         self.paused: set[str] = set()
+        self.acct_qty: dict[str, int] = {}     # 이번 실행 시작 때 계좌 수량 (응답 없는 주문 확인용)
         self.stages: list[tuple[str, float]] = []    # 단계별 걸린 시간 (실행 로그 끝에 표시)
         self._mark = None
 
@@ -190,8 +191,21 @@ class Bot:
         if self.cfg.order_type == "limit" and not force_market:
             price = est_price
         fn = self.broker.buy if side == "BUY" else self.broker.sell
-        res = fn(code, qty, price)
         from . import fills
+        try:
+            res = fn(code, qty, price)
+        except Exception as e:  # noqa: BLE001
+            # 응답 없음(시간 초과·네트워크) — 증권사엔 접수됐을 수 있다. 다시 보내지 않고 다음 확인 때 계좌 수량으로 판단.
+            side_k = "매수" if side == "BUY" else "매도"
+            if self.cfg.mode != "dry":
+                fills.mark_unsure(self.j, self.cfg, side, code, name, qty, est_price, trigger,
+                                  self.acct_qty.get(code, 0), str(e))
+            self.paused.add(code)
+            msg = (f"⚠ {name} {side_k} {qty}주 — 증권사 응답 없음 ({e}). 다시 보내지 않고, "
+                   f"다음 실행 때 계좌 수량으로 체결 여부를 확인할게요")
+            self.say(msg)
+            self.notify("orders", f"⚠ {self._mk()} {msg}")
+            return False
         track = res.ok and self.cfg.mode != "dry" and fills.supported(self.broker)
         self.j.add_order(self.cfg.ledger, side, code, name, qty, est_price, res, trigger,
                          status=None if (track or not res.ok or self.cfg.mode == "dry") else "filled")
@@ -324,6 +338,47 @@ class Bot:
             self.j.set(key, f"{opened}|{pct}")
             self.say(f"📐 {code} ATR 손절선 {pct:+.1f}% (ATR {float(atr[code]):.1f}% × {k:g})")
 
+    def _shadow_prices(self, quotes: dict) -> dict[str, float]:
+        """그림자 보유 종목까지 포함한 지금 가격 (실제 봇이 안 본 종목은 따로 시세 조회)."""
+        from . import shadow
+        prices = {c: float(q.price) for c, q in quotes.items() if q and q.price}
+        for code in shadow.positions(self.j, self.cfg.ledger):
+            if code not in prices:
+                try:
+                    prices[code] = float(self.broker.quote(code).price)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("그림자 시세 실패 %s: %s", code, e)
+        return prices
+
+    def _shadow_watch(self) -> None:
+        """장중 감시 때 그림자(규칙만) 보유 종목의 손절·익절·이익 보호도 (실제 봇과 같은 조건으로 비교하려고)."""
+        if self.cfg.ai_provider == "rules":
+            return
+        try:
+            from . import shadow
+            codes = list(shadow.positions(self.j, self.cfg.ledger))
+            if not codes:
+                return
+            prices, open_ = {}, False
+            for code in codes:
+                q = self.broker.quote(code)
+                prices[code] = float(q.price)
+                open_ = open_ or q.market_status == "1"
+            if open_:
+                shadow.watch(self.j, self.cfg, prices, self.say)
+        except Exception as e:  # noqa: BLE001
+            log.warning("그림자 장중 감시 실패: %s", e)
+
+    def _shadow_step(self, candidates: list[dict], quotes: dict, block: str | None) -> None:
+        """규칙만 그림자 장부 — AI 없이 규칙 신호만 따랐다면 (주문 없음, 비교용 기록만)."""
+        try:
+            from . import shadow
+            r = shadow.step(self.j, self.cfg, candidates, self._shadow_prices(quotes), block, self.say)
+            if r["sold"] or r["bought"]:
+                self.stage("그림자(규칙만)")
+        except Exception as e:  # noqa: BLE001
+            log.warning("그림자 장부 실패: %s", e)
+
     def _cooldown(self, days: int) -> dict[str, str]:
         """손실로 판 지 days 거래일이 안 된 종목 → 사유. 재매수 대기 (보호 규칙)."""
         if not days:
@@ -407,8 +462,12 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             self.say(f"⚠ 체결 확인 중 오류: {e}")
         bal = self.broker.balance()
+        self.acct_qty = {c: int(h.qty) for c, h in bal.holdings.items()}
         from . import corpaction
         paused = corpaction.check(self.j, cfg, bal.holdings, self.say, self.notify) if cfg.mode != "dry" else set()
+        if cfg.mode != "dry":
+            paused |= fills.resolve_unsure(self.j, cfg, bal.holdings, self.say, self.notify)
+            self.paused |= paused
         held = own_holdings(self.j, cfg, bal.holdings)
         for c in paused:
             held.pop(c, None)
@@ -417,6 +476,7 @@ class Bot:
         full = dict(held)
         if sg["core_pct"]:
             held.pop(sg["core_code"], None)              # 코어 ETF 는 손절·익절 대상 아님
+        self._shadow_watch()
         if not held:
             return self._out(), bool(self.lines)
         prices, bids, open_ = {}, {}, False
@@ -480,6 +540,10 @@ class Bot:
         # 1) 데이터 수집
         candidates, quotes = [], {}
         bal = self.broker.balance()
+        self.acct_qty = {c: int(h.qty) for c, h in bal.holdings.items()}
+        if cfg.mode != "dry":                    # 지난번 응답 없던 주문 — 계좌 수량으로 체결 여부 확인
+            from . import fills as _f
+            self.paused |= _f.resolve_unsure(self.j, cfg, bal.holdings, self.say, self.notify)
         bot_codes = self.j.bot_codes(cfg.market)
         parked = self.j.parked(cfg.market)
         if parked:
@@ -635,6 +699,8 @@ class Bot:
             elif ok is None:
                 self.say(f"🚦 시장 필터 건너뜀 ({why})")
 
+        shadow_block = self.no_buy_reason          # 그림자(규칙만)에도 같은 시장 필터 (하루 손실 한도는 봇 자신 기준이라 제외)
+
         # 2-3) 하루 손실 한도: 그날 첫 실행 때의 봇 자산 대비 예산의 N% 넘게 빠지면 그날은 새로 사지 않음
         self._daily_loss_check(st)
 
@@ -657,6 +723,12 @@ class Bot:
                         c["breakout_level"] = float(self.j.get(f"bo_level_{cfg.ledger}_{c['code']}") or 0) or None
                     except ValueError:
                         c["breakout_level"] = None
+
+        if sg["signal"] == "breakout" and sg["late_buy"] and not force and not shadow_block:
+            last = last_slot_wait(cfg)
+            shadow_block = f"돌파 매수는 마지막 실행({last})에서만" if last else None
+        if not analyze_only and cfg.ai_provider != "rules" and getattr(self.analyst, "name", "") != "rules":
+            self._shadow_step(candidates, quotes, shadow_block)
 
         # 3) 규칙 기반 강제 청산 (AI보다 먼저)
         if not analyze_only:
@@ -811,12 +883,17 @@ class Bot:
         if allowed is not None and not analyze_only:      # AI 성적표: 규칙 매수 신호를 AI 가 통과/차단했는지 남김
             try:
                 from . import scorecard
+                from .analyst import _short
                 ai_buy = {d["code"] for d in decisions if d.get("action") == "BUY"
                           and d["confidence"] >= cfg.min_confidence}
+                by_code = {d["code"]: d for d in decisions}
+                me = _short(str(result.get("_provider") or "AI"))
                 for c in candidates:
                     if not c["held"] and c["code"] in allowed:
+                        d = by_code.get(c["code"]) or {}
+                        votes = d.get("votes") or {me: d.get("action", "HOLD")}
                         scorecard.record(self.j, cfg.ledger, cfg.market, c["code"], c["name"], c["price"],
-                                         c["code"] in ai_buy, c.get("rule_signal", ""))
+                                         c["code"] in ai_buy, c.get("rule_signal", ""), votes)
             except Exception as e:  # noqa: BLE001
                 log.warning("AI 성적표 기록 실패: %s", e)
         levels = {c["code"]: c.get("high_20d_prev") for c in candidates} if sg["signal"] == "breakout" else {}

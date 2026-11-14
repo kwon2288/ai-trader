@@ -259,9 +259,16 @@ def pnl():
     except Exception:  # noqa: BLE001
         card = None
     attr = _attribution([(r, j, c.ledger, c.currency, "")])
+    shadow_cmp = None
+    if c.ai_provider != "rules":
+        try:
+            from trader import shadow
+            shadow_cmp = shadow.compare(j, c)
+        except Exception:  # noqa: BLE001
+            shadow_cmp = None
     return render_template("pnl.html", c=c, base=base, market=m, r=r, card=card, periods=PERIODS, p=p, cmp=cmp_, ai=ai,
                            start=start, end=end, f=f or "", t=t or "", chart=bars_svg(days), monthly=monthly,
-                           snap=j.snapshot(c.ledger), attr=attr)
+                           snap=j.snapshot(c.ledger), attr=attr, shadow=shadow_cmp)
 
 
 def snap_budget(j, c) -> float:

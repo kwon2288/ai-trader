@@ -344,6 +344,7 @@ def merge_votes(results: list[dict]) -> dict:
                 "sell_ratio": min((d["sell_ratio"] for d in agree if d["sell_ratio"]), default=1.0),
                 "confidence": round(sum(d["confidence"] for d in agree) / len(agree), 2),
                 "reason": f"[다수결 {cnt}/{n} · {tally}]\n{why}",
+                "votes": {_short(p): d["action"] for p, d in votes},
             })
         else:
             avg = [d["confidence"] for _, d in votes if d["action"] == "HOLD"] or [0.5]
@@ -352,6 +353,7 @@ def merge_votes(results: list[dict]) -> dict:
                 "code": code, "action": "HOLD", "amount_krw": 0, "sell_ratio": 0,
                 "confidence": round(sum(avg) / len(avg), 2),
                 "reason": f"{head}\n{why}",
+                "votes": {_short(p): d["action"] for p, d in votes},
             })
     usage = {"in": sum((r.get("_usage") or {}).get("in", 0) for r in results),
              "out": sum((r.get("_usage") or {}).get("out", 0) for r in results)}

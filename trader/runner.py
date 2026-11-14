@@ -337,6 +337,11 @@ def weekly_text(base: Config, monday, friday) -> str:
                           lambda v: ("+" if v > 0 else "") + c.money(v), budget)
         if cmp_:
             lines.append("  " + cmp_)
+        if c.ai_provider != "rules":
+            from . import shadow
+            sl = shadow.line(j, c)
+            if sl:
+                lines.append("  " + sl)
         if c.ai_hybrid:
             try:
                 from . import scorecard

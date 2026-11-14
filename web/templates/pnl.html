@@ -135,18 +135,64 @@
     아니면 설정 → 예산·위험관리의 비율로 계산한 추정치예요.</div>
 </div>
 
+{% if shadow is defined and shadow and market != 'all' %}
+<div class="card" id="shadow">
+  <h2>AI vs 규칙만 <span class="mute" style="font-weight:normal;font-size:13px">그림자 장부 · {{ shadow.start[5:] }}부터 (기간과 무관)</span></h2>
+  <div class="stats">
+    <div class="stat"><div class="k">실제 봇 (AI)</div>
+      <div class="v">{% if shadow.bot_net_pct is not none %}{{ pct(shadow.bot_net_pct) }}{% else %}-{% endif %}</div>
+      <div class="mute">AI 비용 뺀 뒤{% if shadow.bot_pct is not none %} · 빼기 전 {{ pct(shadow.bot_pct) }}{% endif %}</div></div>
+    <div class="stat"><div class="k">규칙만 (가상)</div>
+      <div class="v">{{ pct(shadow.pct) }}</div>
+      <div class="mute">매도 {{ shadow.n }}건{% if shadow.n %} · 승률 {{ shadow.win_rate }}%{% endif %} · 보유 {{ shadow.open }}종목</div></div>
+  </div>
+  <div style="margin-top:8px">{{ shadow.verdict }}</div>
+  {% if shadow.positions or shadow.trades %}
+  <details style="margin-top:8px"><summary>그림자 보유·최근 매도 보기</summary>
+    <div class="scroll" style="margin-top:6px"><table>
+      {% for x in shadow.positions %}
+      <tr><td>{{ x.name }}<div class="mute sm">{{ x.opened[5:] }} 매수 · 보유 중</div></td>
+        <td class="r nw">{{ pct(((x.last or x.avg) / x.avg - 1) * 100) }}</td></tr>
+      {% endfor %}
+      {% for t in shadow.trades %}
+      <tr><td>{{ t.name }}<div class="mute sm">{{ t.ts[5:10] }} {{ t.reason }}</div></td>
+        <td class="r nw">{{ pct(t.pnl_pct) }}<div class="mute sm">{{ ('+' if t.pnl > 0 else '') ~ money(t.pnl, cur) }}</div></td></tr>
+      {% endfor %}
+    </table></div>
+  </details>
+  {% endif %}
+  <div class="mute" style="margin-top:6px">‘규칙만’은 같은 날·같은 가격·같은 손절·익절·보호 규칙으로 AI 없이 규칙 신호만 따랐다면의 가상 매매예요 (주문 없음).
+    둘 다 예산 대비 % · 평가 손익 포함. 봇의 하루 손실 한도는 그림자에 적용하지 않아요.</div>
+</div>
+{% endif %}
+
 {% if card is defined and card and market != 'all' %}
 <div class="card" id="scorecard">
   <h2>AI 성적표 <span class="mute" style="font-weight:normal;font-size:13px">규칙 매수 신호를 AI 가 걸렀을 때의 결과 (기간과 무관, 전체)</span></h2>
   <div class="stats">
     <div class="stat"><div class="k">AI 가 사자고 한 신호</div>
       <div class="v">{% if card.taken.avg is not none %}{{ pct(card.taken.avg) }}{% else %}-{% endif %}</div>
-      <div class="mute">{{ card.taken.n }}건 평균{% if card.taken.n %} · 오른 것 {{ card.taken.wins }}건{% endif %}</div></div>
+      <div class="mute">{{ card.taken.n }}건 평균{% if card.taken.n %} · 오른 것 {{ card.taken.wins }}건{% endif %}</div>
+      <div class="mute sm">1일 {{ pct(card.taken.avg1) if card.taken.avg1 is not none else '-' }} · 20일 {{ pct(card.taken.avg20) if card.taken.avg20 is not none else '-' }}{% if card.taken.n20 %} ({{ card.taken.n20 }}건){% endif %}</div></div>
     <div class="stat"><div class="k">AI 가 막은 신호</div>
       <div class="v">{% if card.blocked.avg is not none %}{{ pct(card.blocked.avg) }}{% else %}-{% endif %}</div>
-      <div class="mute">{{ card.blocked.n }}건 평균{% if card.blocked.n %} · 오른 것 {{ card.blocked.wins }}건{% endif %}</div></div>
+      <div class="mute">{{ card.blocked.n }}건 평균{% if card.blocked.n %} · 오른 것 {{ card.blocked.wins }}건{% endif %}</div>
+      <div class="mute sm">1일 {{ pct(card.blocked.avg1) if card.blocked.avg1 is not none else '-' }} · 20일 {{ pct(card.blocked.avg20) if card.blocked.avg20 is not none else '-' }}{% if card.blocked.n20 %} ({{ card.blocked.n20 }}건){% endif %}</div></div>
   </div>
   <div style="margin-top:8px">{{ card.verdict }}</div>
+  {% if card.per_ai %}
+  <h2 style="margin-top:12px;font-size:15px">AI 별 적중률 <span class="mute" style="font-weight:normal;font-size:12px">{{ card.after_days }}거래일 뒤 기준</span></h2>
+  <div class="scroll"><table>
+    <tr><th>AI</th><th class="r">적중</th><th class="r">사자 → 평균</th><th class="r">패스 → 평균</th></tr>
+    {% for a in card.per_ai %}
+    <tr><td>{{ a.ai }}<div class="mute sm">{{ a.n }}건</div></td><td class="r nw">{{ a.hit_rate }}%</td>
+      <td class="r nw">{{ pct(a.buy_avg) if a.buy_avg is not none else '-' }}<div class="mute sm">{{ a.buy_n }}건</div></td>
+      <td class="r nw">{{ pct(a.pass_avg) if a.pass_avg is not none else '-' }}<div class="mute sm">{{ a.pass_n }}건</div></td></tr>
+    {% endfor %}
+  </table></div>
+  <div class="mute sm" style="margin-top:4px">적중 = 사자고 한 신호가 올랐거나, 패스한 신호가 오르지 않은 비율. ‘사자 → 평균’이 ‘패스 → 평균’보다 높아야 그 AI 가 가려내는 힘이 있는 거예요.
+    표본이 20건 미만이면 우연일 수 있어요.</div>
+  {% endif %}
   {% if card.rows %}
   <div class="scroll" style="margin-top:8px"><table>
     <tr><th>날짜</th><th>종목</th><th>AI</th><th class="r">{{ card.after_days }}거래일 뒤</th></tr>

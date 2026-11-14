@@ -152,8 +152,36 @@ def test_scorecard():
     said = []
     assert scorecard.update(j, cfg, B(), said.append) == 2 and "성적표" in said[0]
     s = scorecard.summary(j, cfg.ledger)
-    assert s["taken"] == {"n": 1, "avg": 5.0, "wins": 1} and s["blocked"]["avg"] == 5.0 and s["pending"] == 0, (s, key)
-    assert scorecard.update(j, cfg, B()) == 0
+    t = s["taken"]
+    assert (t["n"], t["avg"], t["wins"], t["avg1"], t["avg20"]) == (1, 5.0, 1, 1.0, None), (s, key)
+    assert s["blocked"]["avg"] == 5.0 and s["pending"] == 0
+    assert scorecard.update(j, cfg, B()) == 0                                     # 20거래일 치는 아직 없음 → 그대로
+
+
+def test_scorecard_per_ai_and_20d():
+    cfg = tb.make_cfg(Path(tempfile.mkdtemp()))
+    j = Journal(cfg.db_path)
+    old = (datetime.now(KST).date() - timedelta(days=40)).isoformat()
+    for code, px, votes, ai_buy in (("A", 100, {"Claude": "BUY", "Gemini": "HOLD"}, True),      # 오름
+                                    ("B", 100, {"Claude": "BUY", "Gemini": "HOLD"}, True),      # 내림
+                                    ("C", 100, {"Claude": "HOLD", "Gemini": "HOLD"}, False)):   # 내림
+        scorecard.record(j, cfg.ledger, "kr", code, code, px, ai_buy, "", votes)
+    j.db.execute("UPDATE signal_log SET day=?", (old,))
+    j.db.commit()
+    d0 = datetime.fromisoformat(old)
+
+    class B:
+        def daily(self, code, n=60):
+            step = {"A": 0.01, "B": -0.01, "C": -0.02}[code]
+            return [{"date": (d0 + timedelta(days=i)).strftime("%Y%m%d"), "close": 100 * (1 + step * i)} for i in range(1, 30)]
+    assert scorecard.update(j, cfg, B()) == 3
+    assert j.db.execute("SELECT COUNT(*) n FROM signal_log WHERE done=1").fetchone()["n"] == 3   # 20거래일까지 끝
+    s = scorecard.summary(j, cfg.ledger)
+    assert s["taken"]["avg20"] == 0.0 and s["blocked"]["avg20"] == -40.0 and s["taken"]["n20"] == 2
+    ai = {x["ai"]: x for x in s["per_ai"]}
+    assert ai["Claude"]["n"] == 3 and ai["Claude"]["hit_rate"] == 67                # A 적중 · B 빗나감 · C 적중
+    assert ai["Gemini"]["hit_rate"] == 67 and ai["Gemini"]["buy_n"] == 0            # A 를 놓침 · B·C 적중
+    assert ai["Claude"]["buy_avg"] == 0.0 and ai["Claude"]["pass_avg"] == -10.0
 
 
 def test_web_pages_and_save():

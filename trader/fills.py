@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -143,3 +144,73 @@ def sync_settled_fx(j, cfg, broker, say=print) -> int:
         j.db.commit()
         say(f"💱 미국 주문 {n}건의 환율을 결제 환율로 확정했어요")
     return n
+
+
+# ── 응답 없는 주문 (시간 초과 등) ───────────────────────────
+# 주문 요청이 시간 초과·네트워크 오류로 끝나도 증권사에는 접수됐을 수 있다. 이때 주문을 다시 보내면 중복 매매,
+# 그냥 잊으면 계좌엔 있는데 봇은 모르는 ‘고아’ 종목(손절 감시 밖)이 생긴다. 그래서
+#   1) 주문 전 계좌 수량과 함께 ‘확인 필요’로 남기고, 그 종목은 확인될 때까지 매매하지 않는다
+#   2) 다음 실행·장중 감시 때 계좌 수량을 보고: 늘었으면(매수)/줄었으면(매도) 체결된 것으로 장부에 반영,
+#      그대로인데 그 거래일이 지났으면 접수 안 된 것으로 정리 — 둘 다 알림.
+
+def _unsure_key(cfg) -> str:
+    return f"unsure_{cfg.ledger}"
+
+
+def unsure_list(j, cfg) -> list[dict]:
+    try:
+        return json.loads(j.get(_unsure_key(cfg)) or "[]")
+    except ValueError:
+        return []
+
+
+def mark_unsure(j, cfg, side: str, code: str, name: str, qty: int, est_price: float, trigger: str,
+                before_qty: int, error: str) -> None:
+    from .journal import now
+    items = unsure_list(j, cfg)
+    items.append({"ts": now().isoformat(timespec="seconds"), "day": market_today(cfg.market), "side": side,
+                  "code": code, "name": name, "qty": int(qty), "price": float(est_price), "trigger": trigger,
+                  "before": int(before_qty), "error": str(error)[:200]})
+    j.set(_unsure_key(cfg), json.dumps(items, ensure_ascii=False))
+
+
+def resolve_unsure(j, cfg, holdings: dict, say=print, notify=None) -> set[str]:
+    """응답 없던 주문을 계좌 수량으로 확인. 반환: 아직 확인 못 한 종목(이번에 매매하지 않을 것)."""
+    from .broker import OrderResult
+    items = unsure_list(j, cfg)
+    if not items:
+        return set()
+    keep, pending = [], set()
+    today = market_today(cfg.market)
+    for it in items:
+        h = holdings.get(it["code"])
+        now_q = int(h.qty) if h else 0
+        moved = now_q - it["before"] if it["side"] == "BUY" else it["before"] - now_q
+        side_k = "매수" if it["side"] == "BUY" else "매도"
+        if moved >= 1:
+            q = min(int(moved), it["qty"])
+            px = it["price"]
+            j.add_order(cfg.ledger, it["side"], it["code"], it["name"], q, px,
+                        OrderResult(True, "UNSURE", f"응답 없던 주문 — 계좌 수량 변화로 체결 확인 ({it['error'][:80]})"),
+                        f"{it['trigger']} (응답 없음 → 확인)", status="filled")
+            if it["side"] == "BUY":
+                j.open_position(it["code"], it["name"], cfg.market, q, px)
+            else:
+                j.reduce_position(it["code"], q)
+            msg = (f"⚠ 응답이 없던 {side_k} 주문이 실제로 체결돼 있었어요 — {it['name']}({it['code']}) {q}주. "
+                   f"봇 장부에 넣었어요 (가격은 주문 때 예상가 {cfg.money(px)} 기준)")
+            say(msg)
+            if notify:
+                notify("orders", msg)
+        elif it["day"] < today:
+            msg = f"ℹ 응답이 없던 {side_k} 주문 {it['name']}({it['code']}) {it['qty']}주는 접수되지 않은 것으로 확인했어요 (계좌 수량 그대로)"
+            say(msg)
+            if notify:
+                notify("orders", msg)
+        else:
+            keep.append(it)
+            pending.add(it["code"])
+    j.set(_unsure_key(cfg), json.dumps(keep, ensure_ascii=False))
+    if pending:
+        say("⏳ 응답 없던 주문 확인 대기: " + ", ".join(sorted(pending)) + " — 확인될 때까지 이 종목은 매매하지 않아요")
+    return pending
