@@ -28,8 +28,8 @@
 {% else %}<div class="mute">판단 없음</div>{% endfor %}
 {% endmacro %}
 
-{% macro order_table(orders, cur='KRW') %}
-<div class="scroll"><table>
+{% macro order_table(orders, cur='KRW', more=5) %}
+<div class="scroll"><table data-more="{{ more }}">
 <tr><th>시각</th><th>구분</th><th>종목</th><th class="r">수량</th><th class="r">금액</th><th>사유</th></tr>
 {% for o in orders %}
 <tr>

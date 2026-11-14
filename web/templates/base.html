@@ -110,6 +110,28 @@ details summary{cursor:pointer;color:var(--mute)}
 <div class="mute" style="text-align:center;margin:18px 0 8px;font-size:12px">ai-trader v{{ app_version }}</div>
 </main>
 <script>
+// 긴 표: 최근 N줄만 보이고 나머지는 ‘더보기’ 뒤로 (table[data-more="N"])
+(function () {
+  document.querySelectorAll('table[data-more]').forEach(function (t) {
+    var n = parseInt(t.dataset.more, 10) || 5;
+    var rows = Array.prototype.filter.call(t.querySelectorAll('tr'), function (r) { return r.querySelector('td') && !r.querySelector('td[colspan]'); });
+    if (rows.length <= n) return;
+    var extra = rows.slice(n);
+    extra.forEach(function (r) { r.hidden = true; });
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn'; b.style.cssText = 'margin-top:8px;padding:5px 12px;font-size:13px';
+    var label = function (open) { return open ? '접기 ▴' : '더보기 (' + extra.length + '건) ▾'; };
+    b.textContent = label(false);
+    b.addEventListener('click', function () {
+      var open = extra[0].hidden;
+      extra.forEach(function (r) { r.hidden = !open; });
+      b.textContent = label(open);
+    });
+    (t.closest('.scroll') || t).insertAdjacentElement('afterend', b);
+  });
+})();
+</script>
+<script>
 // 카드 접기/펼치기 (.card.sec) — 주소 끝 #이름 의 카드는 펼쳐서 연다
 (function () {
   if (!document.querySelector('.card.sec')) return;

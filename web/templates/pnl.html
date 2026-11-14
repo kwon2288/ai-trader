@@ -134,7 +134,7 @@
 <div class="card">
   <h2>매도 내역</h2>
   {% if r.trades %}
-  <div class="scroll"><table class="sells">
+  <div class="scroll"><table class="sells" data-more="5">
     <tr><th>날짜</th><th>종목</th><th class="r">평단 → 매도</th><th class="r">손익</th></tr>
     {% for tr in r.trades %}
     {% set qcur = 'USD' if (tr.cur == 'USD' and market == 'all') else cur %}
