@@ -174,43 +174,101 @@ def mark_unsure(j, cfg, side: str, code: str, name: str, qty: int, est_price: fl
     j.set(_unsure_key(cfg), json.dumps(items, ensure_ascii=False))
 
 
-def resolve_unsure(j, cfg, holdings: dict, say=print, notify=None) -> set[str]:
-    """응답 없던 주문을 계좌 수량으로 확인. 반환: 아직 확인 못 한 종목(이번에 매매하지 않을 것)."""
+def resolve_unsure(j, cfg, holdings: dict, say=print, notify=None, broker=None) -> set[str]:
+    """응답 없던 주문 확인. 반환: 아직 확인 못 한 종목(이번에 매매하지 않을 것).
+    ① 증권사가 주문번호 없이 주문을 찾을 수 있으면(NH 국내 find_orders): 그날 같은 종목·방향·수량 주문 중
+       봇이 이미 아는 주문을 뺀 것이 딱 1건이면 그 주문번호로 장부에 넣고(체결 수량·가격은 체결 확인이 증권사 값으로),
+       2건 이상이면 어느 게 봇 주문인지 몰라 확정하지 않고 알림.
+    ② 못 찾는 증권사: 계좌 수량 변화가 주문 수량과 정확히 같을 때만 ‘추정 체결’로 넣고 알림.
+       다르면(사용자가 같은 종목을 따로 사고팔았을 수 있음) 확정하지 않고 직접 확인해 달라고 알림."""
     from .broker import OrderResult
     items = unsure_list(j, cfg)
     if not items:
         return set()
     keep, pending = [], set()
     today = market_today(cfg.market)
+    finder = getattr(broker, "find_orders", None) if broker is not None else None
+
+    def tell(msg: str) -> None:
+        say(msg)
+        if notify:
+            notify("orders", msg)
+
     for it in items:
+        side_k = "매수" if it["side"] == "BUY" else "매도"
+        label = f"{it['name']}({it['code']}) {side_k} {it['qty']}주"
+        passed = it["day"] < today
+        if finder:
+            try:
+                found = finder(it["code"], it["side"], it["qty"], it["day"])
+            except Exception as e:  # noqa: BLE001
+                say(f"⚠ 응답 없던 주문 조회 실패 ({label}): {e}")
+                keep.append(it)
+                pending.add(it["code"])
+                continue
+            known = {str(r[0]).lstrip("0") for r in j.db.execute(
+                "SELECT order_no FROM orders WHERE mode=? AND code=? AND order_no IS NOT NULL", (cfg.ledger, it["code"]))}
+            found = [(no, f) for no, f in found if str(no).lstrip("0") not in known]
+            if len(found) == 1:
+                no, f = found[0]
+                if f.state == "rejected" or (f.state == "canceled" and not f.filled):
+                    tell(f"ℹ 응답이 없던 {label} 주문은 증권사에서 거부·취소된 것으로 확인했어요 (주문번호 {no})")
+                    continue
+                j.add_order(cfg.ledger, it["side"], it["code"], it["name"], it["qty"], it["price"],
+                            OrderResult(True, no, f"응답 없던 주문 — 증권사 주문 내역에서 확인 ({it['error'][:80]})"),
+                            f"{it['trigger']} (응답 없음 → 증권사 확인)", status=None)
+                tell(f"✅ 응답이 없던 {label} 주문을 증권사 주문 내역에서 찾았어요 (주문번호 {no}, 지금 체결 "
+                     f"{f.filled:g}주) — 체결 수량·가격은 증권사 값으로 장부에 반영해요")
+                pending.add(it["code"])            # 이번 실행은 쉬고, 체결 확인이 장부를 맞춘 뒤부터 매매
+                continue
+            if len(found) > 1:
+                if not it.get("told"):
+                    tell(f"⚠ 응답이 없던 {label}: 같은 날 같은 조건 주문이 {len(found)}건이라 어느 게 봇 주문인지 몰라요. "
+                         f"증권사 앱에서 확인해 주세요 — 확인 전까지 이 종목은 매매하지 않아요")
+                    it["told"] = True
+                if passed:
+                    tell(f"⚠ {label}: 끝내 확정하지 못했어요. 봇 장부엔 넣지 않아서 봇은 이 수량을 직접 보유분으로 보고 건드리지 않아요 — 필요하면 증권사 앱에서 직접 정리해 주세요")
+                    continue
+                keep.append(it)
+                pending.add(it["code"])
+                continue
+            if passed:
+                tell(f"ℹ 응답이 없던 {label} 주문은 증권사 주문 내역에 없어 접수되지 않은 것으로 확인했어요")
+                continue
+            keep.append(it)
+            pending.add(it["code"])
+            continue
+        # ② 주문 조회가 안 되는 증권사 — 계좌 수량 변화로 추정
         h = holdings.get(it["code"])
         now_q = int(h.qty) if h else 0
         moved = now_q - it["before"] if it["side"] == "BUY" else it["before"] - now_q
-        side_k = "매수" if it["side"] == "BUY" else "매도"
-        if moved >= 1:
-            q = min(int(moved), it["qty"])
-            px = it["price"]
+        if moved == it["qty"]:
+            q, px = it["qty"], it["price"]
             j.add_order(cfg.ledger, it["side"], it["code"], it["name"], q, px,
-                        OrderResult(True, "UNSURE", f"응답 없던 주문 — 계좌 수량 변화로 체결 확인 ({it['error'][:80]})"),
-                        f"{it['trigger']} (응답 없음 → 확인)", status="filled")
+                        OrderResult(True, "ESTIMATED", f"응답 없던 주문 — 계좌 수량 변화로 추정 ({it['error'][:80]})"),
+                        f"{it['trigger']} (응답 없음 → 수량으로 추정)", status="filled")
             if it["side"] == "BUY":
                 j.open_position(it["code"], it["name"], cfg.market, q, px)
             else:
                 j.reduce_position(it["code"], q)
-            msg = (f"⚠ 응답이 없던 {side_k} 주문이 실제로 체결돼 있었어요 — {it['name']}({it['code']}) {q}주. "
-                   f"봇 장부에 넣었어요 (가격은 주문 때 예상가 {cfg.money(px)} 기준)")
-            say(msg)
-            if notify:
-                notify("orders", msg)
-        elif it["day"] < today:
-            msg = f"ℹ 응답이 없던 {side_k} 주문 {it['name']}({it['code']}) {it['qty']}주는 접수되지 않은 것으로 확인했어요 (계좌 수량 그대로)"
-            say(msg)
-            if notify:
-                notify("orders", msg)
+            tell(f"⚠ 응답이 없던 {label} 주문이 계좌 수량으로 보아 체결된 것 같아요 → 봇 장부에 ‘추정 체결’로 넣었어요 "
+                 f"(가격은 주문 때 예상가 {cfg.money(px)}, 증권사 앱에서 실제 체결가를 확인하세요)")
+        elif moved > 0:
+            if not it.get("told"):
+                tell(f"⚠ 응답이 없던 {label}: 계좌 수량이 {moved}주 바뀌어 주문 수량과 달라요 — 직접 사고판 게 섞였을 수 있어 "
+                     f"확정하지 않았어요. 증권사 앱에서 확인해 주세요")
+                it["told"] = True
+            if passed:
+                tell(f"⚠ {label}: 끝내 확정하지 못했어요. 봇 장부엔 넣지 않아서 봇은 이 수량을 직접 보유분으로 보고 건드리지 않아요 — 필요하면 증권사 앱에서 직접 정리해 주세요")
+                continue
+            keep.append(it)
+            pending.add(it["code"])
+        elif passed:
+            tell(f"ℹ 응답이 없던 {label} 주문은 접수되지 않은 것으로 확인했어요 (계좌 수량 그대로)")
         else:
             keep.append(it)
             pending.add(it["code"])
     j.set(_unsure_key(cfg), json.dumps(keep, ensure_ascii=False))
     if pending:
-        say("⏳ 응답 없던 주문 확인 대기: " + ", ".join(sorted(pending)) + " — 확인될 때까지 이 종목은 매매하지 않아요")
+        say("⏳ 응답 없던 주문 확인 중: " + ", ".join(sorted(pending)) + " — 확인될 때까지 이 종목은 매매하지 않아요")
     return pending

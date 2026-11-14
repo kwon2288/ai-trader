@@ -466,7 +466,7 @@ class Bot:
         from . import corpaction
         paused = corpaction.check(self.j, cfg, bal.holdings, self.say, self.notify) if cfg.mode != "dry" else set()
         if cfg.mode != "dry":
-            paused |= fills.resolve_unsure(self.j, cfg, bal.holdings, self.say, self.notify)
+            paused |= fills.resolve_unsure(self.j, cfg, bal.holdings, self.say, self.notify, self.broker)
             self.paused |= paused
         held = own_holdings(self.j, cfg, bal.holdings)
         for c in paused:
@@ -543,7 +543,7 @@ class Bot:
         self.acct_qty = {c: int(h.qty) for c, h in bal.holdings.items()}
         if cfg.mode != "dry":                    # 지난번 응답 없던 주문 — 계좌 수량으로 체결 여부 확인
             from . import fills as _f
-            self.paused |= _f.resolve_unsure(self.j, cfg, bal.holdings, self.say, self.notify)
+            self.paused |= _f.resolve_unsure(self.j, cfg, bal.holdings, self.say, self.notify, self.broker)
         bot_codes = self.j.bot_codes(cfg.market)
         parked = self.j.parked(cfg.market)
         if parked:
@@ -696,8 +696,9 @@ class Bot:
             if ok is False:
                 self.no_buy_reason = f"시장 필터 — {why}"
                 self.say(f"🚦 {self.no_buy_reason} → 오늘은 새로 사지 않아요")
-            elif ok is None:
-                self.say(f"🚦 시장 필터 건너뜀 ({why})")
+            elif ok is None:                       # 지수를 확인 못 하면 안전하게 매수 보류 (fail-closed)
+                self.no_buy_reason = f"시장 필터 — 지수 확인 실패 ({why})"
+                self.say(f"🚦 {self.no_buy_reason} → 확인될 때까지 새로 사지 않아요 (매도는 그대로)")
 
         shadow_block = self.no_buy_reason          # 그림자(규칙만)에도 같은 시장 필터 (하루 손실 한도는 봇 자신 기준이라 제외)
 

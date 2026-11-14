@@ -3,7 +3,8 @@
 AI 를 쓰는 장부에서만 돈다(규칙만 쓰면 비교할 게 없음). 주문은 절대 내지 않는다.
   · 매수: 규칙 매수 신호(보호 규칙의 추격 차단·재매수 대기 포함)가 나면 그 실행의 가격으로 산다.
           종목당 금액·최대 종목 수·예산은 실제 설정과 같고, 시장 필터·돌파 매수 시점 제한도 같다.
-          (봇의 ‘하루 손실 한도’는 봇 자신의 손실 기준이라 그림자에는 적용하지 않는다.)
+          하루 주문 수 한도·하루 손실 한도도 실제 설정값을 쓰되 그림자 자신의 주문 수·자산 기준으로 센다
+          (손절·이익 보호 매도는 실제 봇처럼 한도와 무관, 손실 한도에 걸려도 매도는 계속).
   · 매도: 손절(고정 % 또는 살 때 정한 ATR 손절)·익절·이익 보호·최대 보유일·규칙 매도 신호 — 실제 봇과 같은 순서.
           장중 감시(15분) 때도 손절·익절·이익 보호를 확인한다.
   · 수수료·세금: 설정의 비율.
@@ -44,6 +45,43 @@ def start_day(j, ledger: str) -> str | None:
 def _fee(cfg, side: str, amt: float, name: str) -> float:
     from .ledger import fee_tax, costs_of
     return fee_tax({"side": side, "name": name}, 1, amt, costs_of(cfg), cfg.ledger)
+
+
+def _orders_today(j, cfg) -> int:
+    v = (j.get(f"shadow_orders_{cfg.ledger}") or "").split("|")
+    return int(v[1]) if len(v) == 2 and v[0] == now().date().isoformat() else 0
+
+
+def _count_order(j, cfg) -> None:
+    j.set(f"shadow_orders_{cfg.ledger}", f"{now().date().isoformat()}|{_orders_today(j, cfg) + 1}")
+
+
+def _order_ok(j, cfg) -> bool:
+    cap = int(getattr(cfg, "max_orders_per_day", 0) or 0)
+    return not cap or _orders_today(j, cfg) < cap
+
+
+def equity(j, cfg) -> float:
+    """그림자 자산 = 예산 + 실현 + 평가(마지막 가격)."""
+    pos = positions(j, cfg.ledger)
+    unreal = sum((p["last"] or p["avg"]) * p["qty"] - p["cost"] for p in pos.values())
+    return _cash(j, cfg) + sum(p["cost"] for p in pos.values()) + unreal
+
+
+def _daily_loss_hit(j, cfg) -> str | None:
+    """그림자 자신의 하루 손실 한도 — 그날 첫 실행 때 자산을 기준점으로."""
+    limit = float(getattr(cfg, "daily_loss_pct", 0) or 0)
+    key = f"shadow_day_{cfg.ledger}"
+    today = now().date().isoformat()
+    eq = equity(j, cfg)
+    v = (j.get(key) or "").split("|")
+    if len(v) != 2 or v[0] != today:
+        j.set(key, f"{today}|{eq}")
+        return None
+    if not limit:
+        return None
+    drop = (eq - float(v[1])) / (float(cfg.total_krw) or 1) * 100
+    return f"그림자 하루 손실 {drop:.2f}% ≤ {limit:g}%" if drop <= limit else None
 
 
 def _sell(j, cfg, p: dict, price: float, reason: str, say) -> None:
@@ -102,6 +140,10 @@ def watch(j, cfg, prices: dict[str, float], say=print) -> int:
         p["peak"] = max(p["peak"] or 0, px)
         why = _exit_reason(cfg, p, px, gopts, cfg.take_profit_pct, 0)
         if why:
+            if why not in ("손절", "이익 보호"):
+                if not _order_ok(j, cfg):
+                    continue
+                _count_order(j, cfg)
             _sell(j, cfg, p, px, why + "(장중)", say)
             n += 1
     j.db.commit()
@@ -129,6 +171,10 @@ def step(j, cfg, candidates: list[dict], prices: dict[str, float], no_buy: str |
         p["peak"] = max(p["peak"] or 0, px)
         why = _exit_reason(cfg, p, px, gopts, cfg.take_profit_pct, sg["max_hold_days"])
         if why:
+            if why not in ("손절", "이익 보호"):          # 지키는 매도만 한도 무관 (실제 봇과 같음)
+                if not _order_ok(j, cfg):
+                    continue
+                _count_order(j, cfg)
             _sell(j, cfg, p, px, why, say)
             pos.pop(code)
             sold += 1
@@ -146,7 +192,10 @@ def step(j, cfg, candidates: list[dict], prices: dict[str, float], no_buy: str |
             x["breakout_level"] = pos[c["code"]]["level"]
         view.append(x)
     cash = _cash(j, cfg)
-    can_buy = not no_buy and len(pos) < cfg.max_positions
+    loss = _daily_loss_hit(j, cfg)
+    if loss:
+        say(f"👥 그림자(규칙만): {loss} → 오늘은 새로 사지 않음")
+    can_buy = not no_buy and not loss and len(pos) < cfg.max_positions
     sig = signals.evaluate(view, can_buy=can_buy, mode=sg["signal"], opts=gopts)
     for code, s in sig.items():
         if s["type"].startswith("SELL") and code in pos and prices.get(code):
@@ -155,6 +204,9 @@ def step(j, cfg, candidates: list[dict], prices: dict[str, float], no_buy: str |
             held_days = (now().date() - date.fromisoformat(p["opened"])).days
             if held_days < cfg.min_hold_days and not s.get("urgent"):
                 continue
+            if not _order_ok(j, cfg):
+                continue
+            _count_order(j, cfg)
             _sell(j, cfg, p, prices[code], "돌파 실패" if s["type"] == "SELL_FAILED_BREAKOUT" else "규칙 매도 신호", say)
             pos.pop(code)
             cash = _cash(j, cfg)
@@ -163,7 +215,7 @@ def step(j, cfg, candidates: list[dict], prices: dict[str, float], no_buy: str |
         buys = sorted([(c, s) for c, s in sig.items() if s["type"].startswith("BUY") and c not in pos],
                       key=lambda kv: -kv[1]["strength"])
         for code, s in buys:
-            if len(pos) >= cfg.max_positions:
+            if len(pos) >= cfg.max_positions or not _order_ok(j, cfg):
                 break
             px = prices.get(code)
             c = by_code.get(code) or {}
@@ -186,6 +238,7 @@ def step(j, cfg, candidates: list[dict], prices: dict[str, float], no_buy: str |
             pos[code] = {"code": code}
             cash -= cost
             bought += 1
+            _count_order(j, cfg)
             say(f"👥 그림자(규칙만) 매수 {c.get('name', code)} {qty}주 @{cfg.money(px)} — {s['reason']}")
     j.db.commit()
     return {"sold": sold, "bought": bought}

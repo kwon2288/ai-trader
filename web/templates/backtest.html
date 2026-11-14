@@ -187,6 +187,14 @@
     지금 종목 목록으로 과거를 돌려서, 그사이 상장폐지된 종목은 빠져 있어요(결과가 좋게 나오는 쪽).</div>
   {% endif %}
   {% if r.core_pct %}<div class="mute" style="margin-top:4px">🧱 코어 {{ r.core_code }} {{ r.core_pct }}% 보유 손익 {{ ('+' if r.core_pnl >= 0 else '') ~ num(r.core_pnl, cur) }} 포함</div>{% endif %}
+  {% if r.filter_missing_days %}
+  <div class="flash" style="margin:10px 0;background:var(--warnbg);color:var(--warn)">시장 필터: 지수 데이터가 없는 날 {{ r.filter_missing_days }}일
+    ({{ r.filter_missing_range[0] }}~{{ r.filter_missing_range[1] }})은 사지 않은 것으로 계산했어요.</div>
+  {% endif %}
+  {% if r.core_missing or (r.core_idle is defined and r.core_pct and r.core_idle > r.core_target * 0.05) %}
+  <div class="flash" style="margin:10px 0;background:var(--warnbg);color:var(--warn)">코어 ETF: 목표 {{ num(r.core_target, cur) }} 중
+    실제 투자 {{ num(r.core_invested, cur) }} · 미투자 {{ num(r.core_idle, cur) }}{% if r.core_missing %} — 코어 ETF 데이터가 없어 코어를 사지 못했어요. 이 결과는 코어-위성 전략 결과가 아니에요{% endif %}.</div>
+  {% endif %}
   {% if r.warn_short or r.warn_jumps %}
   <div class="flash" style="margin:10px 0;background:var(--warnbg);color:var(--warn)">
     {% if r.warn_short %}데이터 기간이 짧은 종목: {{ r.warn_short|join(', ') }} — 일부 기간만 반영됐어요.<br>{% endif %}

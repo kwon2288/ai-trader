@@ -416,6 +416,27 @@ class NHBroker:
                  else "canceled" if can or (open_q == 0 and filled < int(qty)) else "partial" if filled else "open")
         return OrderFill(filled, _num(r.get("cns_avg_uit_pr")), open_q, state)
 
+    def find_orders(self, code: str, side: str, qty: int, day: str) -> list[tuple[str, OrderFill]]:
+        """주문번호 없이 그날 주문 찾기 (응답 없던 주문 확인용) — 종목·매수/매도·주문 수량이 같은 것 전부.
+        반환: [(주문번호, 체결 상태)]. 여러 건이면 어느 게 봇 주문인지 모르니 호출하는 쪽에서 확정하지 않는다."""
+        data = self._post("/krstock/inquiry/v1/dailyOrderExecution", {
+            "orr_dt": day.replace("-", ""), "act_no": self.account, "orr_mkt_cd": "00", "ost_cns_dit": "0"})
+        rows = data.get("Output_0") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        want = "매수" if side == "BUY" else "매도"
+        out = []
+        for r in rows:
+            if (str(r.get("iem_cd", "")).strip().lstrip("A")[-6:] != code or want not in str(r.get("sby_dit_cd_nm", ""))
+                    or _int(r.get("orr_qty")) != int(qty)):
+                continue
+            filled, open_q, can = _int(r.get("tot_cns_qty")), _int(r.get("ny_cns_qty")), _int(r.get("can_qty"))
+            rej = str(r.get("orr_rjt_rsn_cd_nm") or "").strip()
+            state = ("rejected" if rej and not filled else "filled" if filled >= int(qty)
+                     else "canceled" if can or (open_q == 0 and filled < int(qty)) else "partial" if filled else "open")
+            out.append((str(_int(r.get("itg_orr_no"))), OrderFill(filled, _num(r.get("cns_avg_uit_pr")), open_q, state)))
+        return out
+
     def cancel(self, order_no: str, code: str) -> OrderResult:
         if self.mode == "dry":
             return OrderResult(True, "DRY", "[드라이런] 취소")

@@ -92,7 +92,8 @@ def metrics(curve: list[dict], trades: list[dict], budget: float, bench: list[di
     regimes: {up/side/down: {days, ret, bench, mdd}} — 그 장세에 해당하는 날들만 이어 붙인 수익률·낙폭."""
     out: dict = {}
     eq = [c["equity"] for c in curve]
-    rets = [eq[i] / eq[i - 1] - 1 for i in range(1, len(eq)) if eq[i - 1]]
+    base = [budget] + eq if budget else eq             # 첫날 수익률도 넣으려고 시작 예산부터
+    rets = [base[i] / base[i - 1] - 1 for i in range(1, len(base)) if base[i - 1]]
     if len(rets) >= 20:
         mu = sum(rets) / len(rets)
         sd = math.sqrt(sum((r - mu) ** 2 for r in rets) / (len(rets) - 1))
@@ -170,6 +171,7 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
     from .strategy import protect_floor, stop_pct as _stop_for
     reentry = int((guard or {}).get("reentry_days") or 0)
     last_loss: dict[str, int] = {}     # code → 손실 매도한 날의 순번 (재매수 대기용)
+    filter_missing: list[str] = []     # 시장 필터를 켰는데 지수 판단이 없던 날
 
     def sell(code, px, d, why):
         nonlocal realized
@@ -250,7 +252,13 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
                           "affordable": bars[i]["close"] <= per,
                           "today_change_pct": round((bars[i]["close"] / prev - 1) * 100, 2) if prev else None, **ind})
         hold_days = int(getattr(cfg, "min_hold_days", 0) or 0) if min_hold is None else int(min_hold)
-        buy_ok = len(pos) < maxpos and (not market_filter or regime.get(d, True))
+        if market_filter:                  # 지수 데이터가 없는 날은 사지 않음 (fail-closed) — 그런 날 수를 결과에 경고
+            known = regime.get(d)
+            if known is None:
+                filter_missing.append(d)
+            buy_ok = len(pos) < maxpos and known is True
+        else:
+            buy_ok = len(pos) < maxpos
         def held_for(code):
             return (datetime.strptime(d, "%Y%m%d") - datetime.strptime(pos[code]["day"], "%Y%m%d")).days
 
@@ -319,6 +327,11 @@ def run(cfg, data: dict[str, list[dict]], names: dict[str, str] | None = None, *
            "gross_return_pct": round((eq[-1] + paid["fees"]) / budget * 100 - 100, 2),
            "fee_pct": round(fee * 100, 3), "by_code": sorted(by_code.values(), key=lambda b: b["pnl"]),
            "checks": checks, "warn_short": [c["name"] for c in short], "slip_pct": round(slip * 100, 3),
+           "filter_missing_days": len(filter_missing),
+           "filter_missing_range": [filter_missing[0], filter_missing[-1]] if filter_missing else None,
+           "core_target": round(core_budget, 2), "core_invested": round(core["cost"], 2),
+           "core_idle": round(core_budget - core["cost"], 2) if core_budget else 0,
+           "core_missing": bool(core_budget) and not core["qty"],
            "warn_jumps": [f"{c['name']}({', '.join(c['jumps'])})" for c in checks if c["jumps"]]}
     if bench and curve:
         bmap = {b["date"]: b["close"] for b in bench}
