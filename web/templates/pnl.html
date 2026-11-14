@@ -4,6 +4,22 @@
 {% block body %}
 {{ market_tabs(base, market, 'pnl', True) }}
 {% set cur = c.currency %}
+{% macro vs_line(bot, bench, name) %}{% if bot is not none and bench is not none %}봇 {{ "%+.2f"|format(bot) }}% · {{ name.split(' (')[0] }} {{ "%+.2f"|format(bench) }}% →
+  {% if bot > bench %}<span class="up">봇이 {{ "%.2f"|format(bot - bench) }}%p 앞섬</span>{% else %}<span class="down">지수가 {{ "%.2f"|format(bench - bot) }}%p 앞섬</span>{% endif %}{% elif bot is not none %}봇 {{ "%+.2f"|format(bot) }}% · 지수 데이터 없음{% else %}<span class="mute">아직 기록이 없어요</span>{% endif %}{% endmacro %}
+<div class="card" id="glance">
+  <h2>한눈에 <span class="mute" style="font-weight:normal;font-size:13px">지금 봐야 할 것</span></h2>
+  <div class="dec"><div class="mute sm">📈 봇 vs 지수 · 이 기간</div>
+    {% if market == 'all' %}{% for x in cmps or [] %}<div>{{ x.flag }} {{ vs_line(x.bot_pct, x.bench_pct, x.bench_name) }}</div>{% else %}<div class="mute">아직 기록이 없어요</div>{% endfor %}
+    {% else %}<div>{{ vs_line(cmp.bot_pct if cmp else none, cmp.bench_pct if cmp else none, cmp.bench_name if cmp else '') }}</div>{% endif %}</div>
+  {% if market != 'all' %}
+  <div class="dec"><div class="mute sm">🤖 AI vs 규칙만 · {{ (shadow.start[5:] ~ '부터') if shadow is defined and shadow else '그림자 장부' }}</div>
+    <div>{% if shadow is defined and shadow %}{% if shadow.bot_net_pct is not none %}AI {{ "%+.2f"|format(shadow.bot_net_pct) }}% · 규칙만 {{ "%+.2f"|format(shadow.pct) }}% — {% endif %}{{ shadow.verdict }}{% elif c.ai_provider == 'rules' %}<span class="mute">AI 를 안 쓰는 설정이라 비교할 게 없어요</span>{% else %}<span class="mute">다음 정기 실행부터 기록돼요</span>{% endif %}</div></div>
+  <div class="dec"><div class="mute sm">🧪 AI 성적표 · AI 가 고른 신호 vs 막은 신호</div>
+    <div>{% if card is defined and card %}{{ card.verdict }}{% else %}<span class="mute">규칙 필터(하이브리드)를 쓸 때 기록돼요</span>{% endif %}</div></div>
+  {% endif %}
+  <div class="mute sm" style="margin-top:6px">세 가지 모두 표본이 쌓여야 의미가 있어요. 평소엔 이 카드와 금요일 주간 리포트만 보면 돼요.</div>
+</div>
+
 <div class="card">
   <h2>기간별 손익 <a href="{{ url_for('backtest_page') }}" style="font-size:13px;font-weight:normal;float:right">🧪 백테스트 →</a></h2>
   <div class="pills">
@@ -74,8 +90,8 @@
 
 {% if attr and (attr.versions or attr.exits) %}
 {% macro amt(x) %}{% set v = x.pnl_krw if (market == 'all' or x.cur == 'mixed') else x.pnl %}{% set cu = 'KRW' if (market == 'all' or x.cur == 'mixed') else x.cur %}<span class="{{ 'up' if v > 0 else ('down' if v < 0 else '') }}">{{ ('+' if v > 0 else '') ~ money(v, cu) }}</span>{% endmacro %}
-<div class="card">
-  <h2>설정별 손익</h2>
+<div class="card sec" id="by-version" data-sum="{% set lv = (attr.versions|selectattr('latest')|list) %}{% if lv %}지금 v{{ lv[0].no }} · {{ lv[0].label }}{% else %}설정 기록 전 거래만 있어요{% endif %}">
+  <h2 class="sec-head">설정별 손익 · 매도 사유별</h2>
   <div class="mute" style="margin-bottom:6px">설정(전략·AI)을 바꿀 때마다 버전이 하나씩 생겨요. 거래는 <b>살 때의 설정</b>으로 묶어요.
     한 번에 하나만 바꾸고, 버전마다 거래가 10건쯤 쌓인 뒤에 비교하세요.</div>
   {% for v in attr.versions %}
@@ -102,8 +118,8 @@
 </div>
 {% endif %}
 
-<div class="card">
-  <h2>종목별</h2>
+<div class="card sec" id="by-code" data-sum="{% if r.by_code %}{% for b in r.by_code[:3] %}{{ b.name }} {{ ('+' if b.pnl > 0 else '') ~ num(b.pnl, cur) }}{{ ' · ' if not loop.last }}{% endfor %}{% else %}없음{% endif %}">
+  <h2 class="sec-head">종목별</h2>
   {% if r.by_code %}
   <div class="scroll"><table>
     <tr><th>종목</th><th class="r">매도</th><th class="r">실현 손익</th></tr>
@@ -136,8 +152,9 @@
 </div>
 
 {% if shadow is defined and shadow and market != 'all' %}
-<div class="card" id="shadow">
-  <h2>AI vs 규칙만 <span class="mute" style="font-weight:normal;font-size:13px">그림자 장부 · {{ shadow.start[5:] }}부터 (기간과 무관)</span></h2>
+<div class="card sec" id="shadow" data-sum="{{ shadow.verdict }}">
+  <h2 class="sec-head">AI vs 규칙만 · 자세히</h2>
+  <div class="mute sm" style="margin-bottom:6px">그림자 장부 · {{ shadow.start[5:] }}부터 (기간과 무관)</div>
   <div class="stats">
     <div class="stat"><div class="k">실제 봇 (AI)</div>
       <div class="v">{% if shadow.bot_net_pct is not none %}{{ pct(shadow.bot_net_pct) }}{% else %}-{% endif %}</div>
@@ -167,8 +184,9 @@
 {% endif %}
 
 {% if card is defined and card and market != 'all' %}
-<div class="card" id="scorecard">
-  <h2>AI 성적표 <span class="mute" style="font-weight:normal;font-size:13px">규칙 매수 신호를 AI 가 걸렀을 때의 결과 (기간과 무관, 전체)</span></h2>
+<div class="card sec" id="scorecard" data-sum="{{ card.verdict }}">
+  <h2 class="sec-head">AI 성적표 · 자세히</h2>
+  <div class="mute sm" style="margin-bottom:6px">규칙 매수 신호를 AI 가 걸렀을 때의 결과 (기간과 무관, 전체)</div>
   <div class="stats">
     <div class="stat"><div class="k">AI 가 사자고 한 신호</div>
       <div class="v">{% if card.taken.avg is not none %}{{ pct(card.taken.avg) }}{% else %}-{% endif %}</div>
