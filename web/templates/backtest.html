@@ -10,7 +10,7 @@
     <div class="grid2">
       <div><label for="days">기간</label>
         <select id="days" name="days">
-          {% for d, l in [(250,'최근 1년'),(500,'최근 2년'),(750,'최근 3년')] %}
+          {% for d, l in [(250,'최근 1년'),(500,'최근 2년'),(750,'최근 3년'),(1250,'최근 5년 (하락장 포함)')] %}
           <option value="{{ d }}" {{ 'selected' if (r and r.params.days == d) or (not r and d == 500) }}>{{ l }}</option>{% endfor %}
         </select></div>
       <div><label for="signal">매매 신호</label>
@@ -87,7 +87,9 @@
     <tr {% if idx == pk %}style="background:var(--okbg)"{% endif %}>
       <td>{{ idx + 1 }}{% if idx == pk %}<div style="font-size:11px">추천</div>{% endif %}</td>
       <td style="font-size:13px">{% if sw.kind == 'short' %}<b>{{ modes.get(x.signal, x.signal) }}</b> · {% endif %}손절 {{ ('%g'|format(x.stop_atr) ~ '×ATR') if x.stop_atr else (x.stop ~ '%') }} · 익절 +{{ x.take }}%<div class="mute">{% if sw.kind == 'short' %}최대 {{ (x.max_hold ~ '일') if x.max_hold else '제한 없음' }}{% else %}보유 {{ x.min_hold }}일{% endif %}{{ ' · 필터' if x.market_filter }}{{ ' · 보호' if x.guard }}{{ (' · 코어 ' ~ x.core_pct ~ '%') if x.core_pct }} · {{ x.n }}회{% if x.avg_trade_pct is defined and x.avg_trade_pct is not none %} · 거래당 {{ "%+.2f"|format(x.avg_trade_pct) }}%{% endif %}</div></td>
-      <td class="r nw">{{ pct(x.return_pct) }}<div class="mute"><span class="down">{{ "%.1f"|format(x.mdd_pct) }}%</span>{{ ' · 지수↑' if x.bench_pct is not none and x.return_pct > x.bench_pct }}</div></td>
+      <td class="r nw">{{ pct(x.return_pct) }}<div class="mute"><span class="down">{{ "%.1f"|format(x.mdd_pct) }}%</span>{{ ' · 지수↑' if x.bench_pct is not none and x.return_pct > x.bench_pct }}</div>
+        {% if x.down_days %}<div class="mute sm" title="앞·뒤 기간의 하락장 날들을 이어 붙인 성과">하락장 {{ pct(x.down_ret) }} (지수 {{ "%+.1f"|format(x.down_bench) }}%)</div>{% endif %}
+        {% if x.profit_factor is defined and x.profit_factor is not none %}<div class="mute sm">PF {{ x.profit_factor }} · 연속손실 {{ x.max_losing_streak }}</div>{% endif %}</td>
       {% if v %}<td class="r nw">{{ pct(x.oos_return_pct) }}{{ ' ✅' if x.oos_return_pct > 0 }}<div class="mute"><span class="down">{{ "%.1f"|format(x.oos_mdd_pct) }}%</span> · {{ x.oos_n }}회{{ ' · 지수↑' if x.oos_bench_pct is not none and x.oos_return_pct > x.oos_bench_pct }}</div></td>{% endif %}
       <td><form method="post" action="{{ url_for('strategy_apply') }}" class="inline"
             onsubmit="return confirm('이 조건을 실제 설정에 적용할까요? (국내·미국 공통, 다음 실행부터)')">
@@ -110,6 +112,36 @@
 </div>
 {% endif %}
 
+{% if shadow_on or rp %}
+<div class="card" id="replay">
+  <h2>재현 점검 <span class="mute" style="font-weight:normal;font-size:13px">백테스트 ↔ 그림자 장부(규칙만, 실시간)</span></h2>
+  <div class="mute" style="margin-bottom:8px">그림자 장부가 시작된 날부터 오늘까지를 지금 설정으로 백테스트해서, 실시간 가상 매매와 같은 결과가 나오는지 봐요.
+    둘 다 AI 없이 규칙만이라 차이는 백테스트 가정(다음 날 시가 체결 등) 때문이에요.</div>
+  {% if rp %}
+  <div class="stats">
+    <div class="stat"><div class="k">신호 일치율</div><div class="v">{{ rp.match_rate if rp.match_rate is not none else '-' }}%</div>
+      <div class="mute">일치 {{ rp.pairs|length }} · 백테스트에만 {{ rp.only_bt|length }} · 실시간에만 {{ rp.only_shadow|length }}</div></div>
+    <div class="stat"><div class="k">수익률</div><div class="v">{{ pct(rp.shadow_pct or 0) }}</div>
+      <div class="mute">백테스트 {{ pct(rp.bt_return_pct) }} · 차이 {{ "%+.2f"|format(rp.gap) }}%p</div></div>
+    <div class="stat"><div class="k">진입 가격 차이</div><div class="v">{% if rp.px_diff_avg is not none %}{{ "%+.2f"|format(rp.px_diff_avg) }}%{% else %}-{% endif %}</div>
+      <div class="mute">실시간이 백테스트 시가보다 (+비쌈)</div></div>
+  </div>
+  <div style="margin-top:8px">{{ rp.verdict }}</div>
+  <div class="mute sm">{{ rp.start }} ~ {{ rp.end[:4] ~ '-' ~ rp.end[4:6] ~ '-' ~ rp.end[6:] if rp.end else '' }} · 점검 {{ rp.ts[5:16].replace('T',' ') }} · 기준: {{ rp.criteria }}</div>
+  {% if rp.only_bt or rp.only_shadow %}
+  <details style="margin-top:6px"><summary>한쪽에만 있는 매수 보기</summary>
+    <div class="mute sm" style="margin-top:4px">
+      {% if rp.only_bt %}백테스트에만: {% for x in rp.only_bt %}{{ x.name }}({{ x.day[4:6] ~ '-' ~ x.day[6:] if x.day|length == 8 else x.day[5:] }}){{ ', ' if not loop.last }}{% endfor %}<br>{% endif %}
+      {% if rp.only_shadow %}실시간에만: {% for x in rp.only_shadow %}{{ x.name }}({{ x.day[5:] }}){{ ', ' if not loop.last }}{% endfor %}{% endif %}
+    </div>
+    <div class="mute sm" style="margin-top:4px">백테스트에만 = 종가 기준으론 신호가 났는데 실행 시각엔 안 났던 것 · 실시간에만 = 장중엔 신호가 났다가 종가엔 사라진 것 (가짜 신호일 가능성).</div>
+  </details>
+  {% endif %}
+  {% else %}<div class="mute">아직 점검 기록이 없어요.</div>{% endif %}
+  <form method="post" style="margin-top:8px"><button class="btn" name="mode" value="replay" {{ 'disabled' if busy }}>🔁 재현 점검</button></form>
+</div>
+{% endif %}
+
 {% if r %}
 <div class="card">
   <h2>결과 <span class="mute" style="font-weight:normal;font-size:13px">{{ r.start[:4] }}-{{ r.start[4:6] }}-{{ r.start[6:] }} ~ {{ r.end[:4] }}-{{ r.end[4:6] }}-{{ r.end[6:] }} {% if r.signal is defined %} · {{ modes.get(r.signal, r.signal) }}{% endif %} · 손절 {{ ('%g'|format(r.stop_atr) ~ '×ATR') if r.stop_atr else (r.stop ~ '%') }} · 익절 +{{ r.take }}%{% if r.max_hold %} · 최대 {{ r.max_hold }}일{% endif %}{% if r.min_hold is defined %} · 보유 {{ r.min_hold }}일{% endif %}{% if r.market_filter %} · 시장필터{% endif %}{% if r.guard %} · 보호 규칙{% endif %}{% if r.core_pct %} · 코어 {{ r.core_pct }}%{% endif %} · {{ r.symbols }}종목</span></h2>
@@ -127,8 +159,33 @@
     <div class="stat"><div class="k">수수료·세금 합계</div><div class="v"><span class="down">-{{ num(r.fees or 0, cur) }}</span></div>
       <div class="mute">한쪽 {{ r.fee_pct }}% × {{ r.n }}회 왕복</div></div>
     <div class="stat"><div class="k">수수료 빼기 전</div><div class="v">{% if r.gross_return_pct is defined %}{{ pct(r.gross_return_pct) }}{% else %}-{% endif %}</div>
-      <div class="mute">전략 자체의 성과</div></div>
+      <div class="mute">전략 자체의 성과{% if r.slip_pct %} · 슬리피지 {{ r.slip_pct }}% 반영{% endif %}</div></div>
   </div>
+  {% if r.profit_factor is defined %}
+  <div class="stats" style="margin-top:8px">
+    <div class="stat"><div class="k">수익 팩터</div><div class="v">{{ r.profit_factor if r.profit_factor is not none else '-' }}</div>
+      <div class="mute">이긴 합 ÷ 진 합 · 1 넘어야 이득</div></div>
+    <div class="stat"><div class="k">최대 연속 손실</div><div class="v">{{ r.max_losing_streak }}회</div></div>
+    <div class="stat"><div class="k">샤프 · 소르티노</div><div class="v">{{ r.sharpe if r.sharpe is not none else '-' }} · {{ r.sortino if r.sortino is not none else '-' }}</div>
+      <div class="mute">흔들림 대비 수익 (1 넘으면 양호)</div></div>
+    <div class="stat"><div class="k">연환산 (CAGR)</div><div class="v">{% if r.cagr is not none %}{{ pct(r.cagr) }}{% else %}-{% endif %}</div></div>
+  </div>
+  {% endif %}
+  {% if r.regimes %}
+  <h2 style="margin-top:14px;font-size:15px">장세별 성과 <span class="mute" style="font-weight:normal;font-size:12px">지수 기준 · 그 장세인 날들만 이어 붙인 값</span></h2>
+  <div class="scroll"><table>
+    <tr><th>장세</th><th class="r">일수</th><th class="r">봇</th><th class="r">지수</th><th class="r">봇 낙폭</th></tr>
+    {% for k, nm in [('up','상승장'),('side','횡보장'),('down','하락장')] %}{% set g = r.regimes[k] %}
+    <tr><td>{{ nm }}</td><td class="r">{{ g.days }}</td>
+      <td class="r nw">{% if g.days %}{{ pct(g.ret) }}{% else %}-{% endif %}</td>
+      <td class="r nw">{% if g.days %}{{ pct(g.bench) }}{% else %}-{% endif %}</td>
+      <td class="r nw">{% if g.days %}<span class="down">{{ "%.1f"|format(g.mdd) }}%</span>{% else %}-{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  <div class="mute sm" style="margin-top:4px">하락장 = 지수가 200일선 아래 · 상승장 = 200일선 위이고 60거래일 +5% 이상 · 횡보장 = 그 밖.
+    {% if not r.regimes.down.days %}<b>이 기간엔 하락장이 없어요 — ‘최근 5년’으로 돌려 보세요.</b>{% else %}하락장에서 봇 낙폭이 지수 하락보다 작아야 손실을 통제한다고 볼 수 있어요.{% endif %}
+    지금 종목 목록으로 과거를 돌려서, 그사이 상장폐지된 종목은 빠져 있어요(결과가 좋게 나오는 쪽).</div>
+  {% endif %}
   {% if r.core_pct %}<div class="mute" style="margin-top:4px">🧱 코어 {{ r.core_code }} {{ r.core_pct }}% 보유 손익 {{ ('+' if r.core_pnl >= 0 else '') ~ num(r.core_pnl, cur) }} 포함</div>{% endif %}
   {% if r.warn_short or r.warn_jumps %}
   <div class="flash" style="margin:10px 0;background:var(--warnbg);color:var(--warn)">

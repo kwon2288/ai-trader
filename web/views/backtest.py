@@ -20,6 +20,13 @@ def _run_backtest(market: str, p: dict) -> None:
     j = Journal(c.db_path)
     prog = lambda k, n, code: webapp._job.update(progress=f"{k}/{n} {code}")  # noqa: E731
     try:
+        if p.get("replay"):
+            from trader import replay
+            r = replay.run(c, make_broker(c), progress=prog)
+            j.add_log(c.ledger, "backtest", "web",
+                      f"재현 점검 {r['start']}~: 일치율 {r['match_rate']}% · 백테스트 {r['bt_return_pct']:+.2f}% vs "
+                      f"그림자 {r['shadow_pct'] if r['shadow_pct'] is not None else 0:+.2f}% — {r['verdict']}")
+            return
         if p.get("sweep"):
             from trader.signals import label
             r = backtest.sweep(c, make_broker(c), p["days"], p["symbols"], BENCH[market][0], progress=prog,
@@ -70,6 +77,11 @@ def backtest_page():
     m = webapp.current_market()
     base = webapp.cfg()
     c = base.for_market(m)
+    if request.method == "POST" and request.form.get("mode") == "replay":
+        err = webapp._start_job("backtest", m, {"replay": True})
+        flash(err or "🔁 재현 점검을 시작했어요 — 그림자 장부 기간을 백테스트로 다시 돌려 비교해요 (1~2분).",
+              "err" if err else "ok")
+        return redirect(url_for("backtest_page") + "#replay")
     if request.method == "POST":
         f = request.form
         try:
@@ -85,7 +97,7 @@ def backtest_page():
             return redirect(url_for("backtest_page"))
         from trader.signals import MODES
         signal = f.get("signal", "trend") if f.get("signal") in MODES else "trend"
-        if days not in (250, 500, 750) or not (-50 <= stop < 0) or not (0 < take <= 200) \
+        if days not in (250, 500, 750, 1250) or not (-50 <= stop < 0) or not (0 < take <= 200) \
                 or not (0 <= min_hold <= 60) or not (0 <= core_pct <= 90) or not (0 <= max_hold <= 60) \
                 or not (0 <= stop_atr <= 10):
             flash("기간·손절(-50~0)·익절(0~200)·보유일(0~60)·코어(0~90%)를 확인하세요.", "err")
@@ -116,7 +128,13 @@ def backtest_page():
     return render_template("backtest.html", c=c, base=base, market=m, r=r, chart=chart, bench=BENCH[m],
                            busy=webapp._busy(c), job=webapp._job, sw=backtest.load_sweep(c.data_dir, m), sg=strategy.settings(c),
                            modes={k: v[0] for k, v in MODES.items()},
-                           n_full=backtest.grid_size(backtest.GRID), n_short=backtest.grid_size(backtest.SHORT_GRID))
+                           n_full=backtest.grid_size(backtest.GRID), n_short=backtest.grid_size(backtest.SHORT_GRID),
+                           rp=_replay(c), shadow_on=c.ai_provider != "rules")
+
+
+def _replay(c):
+    from trader import replay
+    return replay.load(c.data_dir, c.market)
 
 
 def _market_values(f, p: str) -> tuple[dict | None, str | None]:

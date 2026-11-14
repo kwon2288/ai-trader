@@ -20,6 +20,7 @@ FIELDS = [
     ("costs", "kr_fee_pct", float, 0, 1, "국내 수수료 (%, 매수·매도 각각)"),
     ("costs", "kr_sell_tax_pct", float, 0, 1, "국내 매도 거래세 (%, ETF 제외)"),
     ("costs", "us_fee_pct", float, 0, 2, "미국 수수료 (%, 매수·매도 각각)"),
+    ("costs", "slip_pct", float, 0, 2, "백테스트 슬리피지 (%, 살 때·팔 때 각각 — 백테스트에만 씀)"),
 ]
 AUTO_FIELDS = [
     ("universe", "auto_count", int, 0, 30, "자동 선정 종목 수 (0 = 끄기)"),
@@ -27,7 +28,7 @@ AUTO_FIELDS = [
     ("universe", "auto_min_price", int, 0, 1_000_000, "최소 주가 (원)"),
     ("universe", "auto_scan_pool", int, 20, 1000, "시세 조회 범위 (시총 상위 N개)"),
 ]
-DEFAULTS = {"daily_loss_pct": 0, "auto_count": 10, "auto_min_cap_eok": 3000, "auto_min_price": 1000, "auto_scan_pool": 200}
+DEFAULTS = {"daily_loss_pct": 0, "slip_pct": 0.05, "auto_count": 10, "auto_min_cap_eok": 3000, "auto_min_price": 1000, "auto_scan_pool": 200}
 US_FIELDS = [
     ("us", "total_usd", float, 10, 10_000_000, "미국 원금 ($)"),
     ("us", "max_per_position_usd", float, 1, 10_000_000, "미국 종목당 최대 ($)"),

@@ -11,7 +11,8 @@ import re
 from datetime import date
 
 # 수수료·세금 기본값 (%) — 웹 설정 → 예산·위험관리에서 바꿀 수 있음. 증권사가 실제 값을 주면 그걸 쓴다.
-DEFAULT_COSTS = {"kr_fee_pct": 0.015, "kr_sell_tax_pct": 0.20, "us_fee_pct": 0.25}
+DEFAULT_COSTS = {"kr_fee_pct": 0.015, "kr_sell_tax_pct": 0.20, "us_fee_pct": 0.25,
+                 "slip_pct": 0.05}     # slip_pct: 백테스트 슬리피지 가정 (한쪽 %, 실제 손익 계산엔 안 씀)
 # 국내 ETF·ETN 은 매도 거래세가 없다
 _ETF = re.compile(r"^(KODEX|TIGER|KBSTAR|RISE|ACE|SOL|HANARO|KOSEF|ARIRANG|PLUS|KIWOOM|TIMEFOLIO|WON|BNK|1Q|파워|"
                   r"마이티|히어로즈|에셋플러스|UNICORN|VITA|ITF|TRUSTON|KoAct|마이다스|DAISHIN|FOCUS)\b|ETF|ETN", re.I)
